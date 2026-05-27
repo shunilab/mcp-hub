@@ -1,0 +1,11 @@
+{
+  "name": "mcp-hub",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:cli": "pnpm --filter @mcp-hub/cli dev",
+    "dev:app": "pnpm --filter @mcp-hub/app dev"
+  }
+}

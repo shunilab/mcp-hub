@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+
+# Tauri
+packages/app/src-tauri/target/
+packages/app/src-tauri/gen/
+
+# Build artifacts
+packages/cli/dist/
+packages/app/dist/

@@ -1,0 +1,64 @@
+#!/usr/bin/env node
+import { Command } from "commander";
+import { sync } from "./commands/sync.js";
+import { add } from "./commands/add.js";
+import { remove } from "./commands/remove.js";
+import { list } from "./commands/list.js";
+import { importFrom } from "./commands/import.js";
+import { status } from "./commands/status.js";
+import { undo } from "./commands/undo.js";
+import { pruneOldBackups } from "./utils/fs.js";
+
+pruneOldBackups();
+
+const program = new Command();
+
+program.name("mcp-hub").description("MCP configuration hub").version("0.1.0");
+
+program
+  .command("sync")
+  .description("Sync MCP servers between master and clients")
+  .option("--from <client>", "Source: client name, 'master', or 'all'")
+  .option("--to <client>", "Destination: client name or 'master'")
+  .action(sync);
+
+program
+  .command("add <name>")
+  .description("Add a server to master")
+  .option("--command <cmd>", "Command to run the server")
+  .option("--args <args>", "Arguments (space-separated, quote the whole string)")
+  .option("--url <url>", "URL for remote servers")
+  .option("--env <pairs>", "Env vars as KEY=VAL,KEY2=VAL2")
+  .action(add);
+
+program
+  .command("remove <name>")
+  .description("Remove a server from master")
+  .action(remove);
+
+program
+  .command("list")
+  .description("List servers in master or a specific client")
+  .option("--client <client>", "Show servers for this client instead of master")
+  .option("--json", "Output as JSON")
+  .action(list);
+
+program
+  .command("import")
+  .description("Import servers from a client into master")
+  .requiredOption("--from <client>", "Source client")
+  .action(importFrom);
+
+program
+  .command("status")
+  .description("Show sync status across all clients")
+  .option("--json", "Output as JSON")
+  .action(status);
+
+program
+  .command("undo")
+  .description("Restore the latest backup")
+  .option("--client <client>", "Restore a specific client config (default: master)")
+  .action(undo);
+
+program.parse();
