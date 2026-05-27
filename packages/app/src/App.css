@@ -76,11 +76,18 @@ body, #root { height: 100vh; overflow: hidden; }
 }
 .column-master { border-color: rgba(124,106,247,0.4); }
 .column-over { border-color: var(--accent); background: rgba(124,106,247,0.05); }
+.column-dragging { opacity: 0.4; }
 .column-header {
   display: flex; align-items: center; gap: 6px;
   padding: 10px 12px 8px; border-bottom: 1px solid var(--border);
   font-weight: 600; font-size: 13px;
 }
+.drag-handle {
+  color: var(--text-muted); display: flex; align-items: center;
+  cursor: grab; flex-shrink: 0;
+}
+.drag-handle:hover { color: var(--text); }
+.drag-handle:active { cursor: grabbing; }
 .column-title { flex: 1; }
 .column-count {
   background: var(--bg-hover); color: var(--text-muted);
