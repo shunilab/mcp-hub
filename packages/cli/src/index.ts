@@ -79,4 +79,4 @@ configCmd
   .description("Override the config file path for a client")
   .action(configSetPath);
 
-await program.parseAsync();
+(async () => { await program.parseAsync(); })();
