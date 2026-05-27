@@ -3,46 +3,111 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { addServer } from "../hooks/useCli";
 import { Plus, ExternalLink, AlertCircle, Minus } from "lucide-react";
 
-interface OfficialServer {
-  name: string;
+// ── types ────────────────────────────────────────────────────────────────────
+
+interface DiscoverServer {
+  id: string;
+  displayName: string;
   packageName: string;
   description: string;
-  runtime: "npx" | "uvx";
+  source: "official" | "smithery";
+  runtime: "npx" | "uvx" | "remote";
+  homepage?: string;
 }
+
+type SourceFilter = "all" | "official" | "smithery";
+type RuntimeFilter = "all" | "local" | "remote";
+
+// ── constants ─────────────────────────────────────────────────────────────────
 
 const GH_CONTENTS = "https://api.github.com/repos/modelcontextprotocol/servers/contents/src";
 const GH_RAW = "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src";
 const GH_TREE = "https://github.com/modelcontextprotocol/servers/tree/main/src";
+const SMITHERY_URL = "https://registry.smithery.ai/servers?q=&page=1&pageSize=100";
 
-async function fetchServerInfo(name: string): Promise<OfficialServer | null> {
-  // Try npm package.json first
-  const pkgRes = await fetch(`${GH_RAW}/${name}/package.json`);
-  if (pkgRes.ok) {
-    const pkg = await pkgRes.json();
-    return {
-      name,
-      packageName: (pkg.name as string) ?? `@modelcontextprotocol/server-${name}`,
-      description: (pkg.description as string) ?? "",
-      runtime: "npx",
-    };
-  }
-  // Fall back to pyproject.toml
-  const pyRes = await fetch(`${GH_RAW}/${name}/pyproject.toml`);
-  if (pyRes.ok) {
-    const text = await pyRes.text();
-    const pkgName = text.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? `mcp-server-${name}`;
-    const desc = text.match(/^description\s*=\s*"([^"]+)"/m)?.[1] ?? "";
-    return { name, packageName: pkgName, description: desc, runtime: "uvx" };
-  }
-  return null;
+// ── fetchers ──────────────────────────────────────────────────────────────────
+
+async function fetchOfficial(): Promise<DiscoverServer[]> {
+  const items: { name: string; type: string }[] = await fetch(GH_CONTENTS).then((r) => r.json());
+  const dirs = items.filter((i) => i.type === "dir");
+
+  const results = await Promise.allSettled(
+    dirs.map(async (d) => {
+      const pkgRes = await fetch(`${GH_RAW}/${d.name}/package.json`);
+      if (pkgRes.ok) {
+        const pkg = await pkgRes.json();
+        return {
+          id: `official:${d.name}`,
+          displayName: d.name,
+          packageName: (pkg.name as string) ?? `@modelcontextprotocol/server-${d.name}`,
+          description: (pkg.description as string) ?? "",
+          source: "official" as const,
+          runtime: "npx" as const,
+          homepage: `${GH_TREE}/${d.name}`,
+        };
+      }
+      const pyRes = await fetch(`${GH_RAW}/${d.name}/pyproject.toml`);
+      if (pyRes.ok) {
+        const text = await pyRes.text();
+        const pkgName = text.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? `mcp-server-${d.name}`;
+        const desc = text.match(/^description\s*=\s*"([^"]+)"/m)?.[1] ?? "";
+        return {
+          id: `official:${d.name}`,
+          displayName: d.name,
+          packageName: pkgName,
+          description: desc,
+          source: "official" as const,
+          runtime: "uvx" as const,
+          homepage: `${GH_TREE}/${d.name}`,
+        };
+      }
+      return null;
+    })
+  );
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<DiscoverServer> => r.status === "fulfilled" && r.value !== null)
+    .map((r) => r.value);
 }
 
+async function fetchSmithery(): Promise<DiscoverServer[]> {
+  const data = await fetch(SMITHERY_URL).then((r) => r.json());
+  const raw: {
+    id: string;
+    qualifiedName: string;
+    displayName: string;
+    description: string;
+    remote: boolean;
+    homepage?: string;
+  }[] = data.servers ?? data.items ?? data;
+  if (!Array.isArray(raw)) return [];
+
+  return raw.map((s) => {
+    const pkgName = s.qualifiedName.includes("/") ? `@${s.qualifiedName}` : s.qualifiedName;
+    return {
+      id: `smithery:${s.id}`,
+      displayName: s.displayName,
+      packageName: pkgName,
+      description: s.description ?? "",
+      source: "smithery" as const,
+      runtime: s.remote ? "remote" : "npx",
+      homepage: s.homepage ?? `https://smithery.ai/server/${s.qualifiedName}`,
+    };
+  });
+}
+
+// ── component ──────────────────────────────────────────────────────────────────
+
 export function DiscoverView() {
-  const [servers, setServers] = useState<OfficialServer[]>([]);
+  const [servers, setServers] = useState<DiscoverServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [query, setQuery] = useState("");
-  const [addingName, setAddingName] = useState<string | null>(null);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("local");
+
+  const [addingId, setAddingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   // Manual add form
@@ -53,43 +118,50 @@ export function DiscoverView() {
   const [formEnv, setFormEnv] = useState<{ key: string; value: string }[]>([]);
 
   useEffect(() => {
-    fetch(GH_CONTENTS)
-      .then((r) => r.json())
-      .then(async (items: { name: string; type: string }[]) => {
-        const dirs = items.filter((i) => i.type === "dir");
-        const results = await Promise.allSettled(dirs.map((d) => fetchServerInfo(d.name)));
-        const loaded = results
-          .filter((r): r is PromiseFulfilledResult<OfficialServer> =>
-            r.status === "fulfilled" && r.value !== null
-          )
-          .map((r) => r.value);
-        setServers(loaded);
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(String(e));
-        setLoading(false);
-      });
+    Promise.allSettled([fetchOfficial(), fetchSmithery()]).then(([officialRes, smitheryRes]) => {
+      const official = officialRes.status === "fulfilled" ? officialRes.value : [];
+      const smithery = smitheryRes.status === "fulfilled" ? smitheryRes.value : [];
+
+      // Deduplicate: official takes precedence over smithery entries with same packageName
+      const seen = new Set(official.map((s) => s.packageName));
+      const deduped = smithery.filter((s) => !seen.has(s.packageName));
+
+      setServers([...official, ...deduped]);
+      setLoading(false);
+      if (officialRes.status === "rejected" && smitheryRes.status === "rejected") {
+        setError("Failed to load servers");
+      }
+    });
   }, []);
 
-  const filtered = servers.filter(
-    (s) =>
-      !query ||
-      s.name.toLowerCase().includes(query.toLowerCase()) ||
-      s.description.toLowerCase().includes(query.toLowerCase())
-  );
+  const officialCount = servers.filter((s) => s.source === "official").length;
+  const smitheryCount = servers.filter((s) => s.source === "smithery").length;
 
-  async function handleAdd(s: OfficialServer) {
-    setAddingName(s.name);
+  const filtered = servers.filter((s) => {
+    const matchesQuery =
+      !query ||
+      s.displayName.toLowerCase().includes(query.toLowerCase()) ||
+      s.description.toLowerCase().includes(query.toLowerCase()) ||
+      s.packageName.toLowerCase().includes(query.toLowerCase());
+    const matchesSource = sourceFilter === "all" || s.source === sourceFilter;
+    const matchesRuntime =
+      runtimeFilter === "all" ||
+      (runtimeFilter === "local" ? s.runtime !== "remote" : s.runtime === "remote");
+    return matchesQuery && matchesSource && matchesRuntime;
+  });
+
+  async function handleAdd(s: DiscoverServer) {
+    setAddingId(s.id);
     try {
+      const name = s.displayName.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
       if (s.runtime === "npx") {
-        await addServer(s.name, { command: "npx", args: ["-y", s.packageName] });
-      } else {
-        await addServer(s.name, { command: "uvx", args: [s.packageName] });
+        await addServer(name, { command: "npx", args: ["-y", s.packageName] });
+      } else if (s.runtime === "uvx") {
+        await addServer(name, { command: "uvx", args: [s.packageName] });
       }
-      setAdded((prev) => new Set([...prev, s.name]));
+      setAdded((prev) => new Set([...prev, s.id]));
     } finally {
-      setAddingName(null);
+      setAddingId(null);
     }
   }
 
@@ -108,21 +180,16 @@ export function DiscoverView() {
       if (key.trim()) acc[key.trim()] = value;
       return acc;
     }, {});
-    await addServer(formName, {
-      command: formCommand,
-      args,
-      env: Object.keys(env).length ? env : undefined,
-    });
+    await addServer(formName, { command: formCommand, args, env: Object.keys(env).length ? env : undefined });
     closeForm();
   }
 
   function addArg() { setFormArgs((p) => [...p, ""]); }
-  function setArg(i: number, v: string) { setFormArgs((p) => p.map((a, idx) => idx === i ? v : a)); }
-  function removeArg(i: number) { setFormArgs((p) => p.length > 1 ? p.filter((_, idx) => idx !== i) : [""]); }
-
+  function setArg(i: number, v: string) { setFormArgs((p) => p.map((a, idx) => (idx === i ? v : a))); }
+  function removeArg(i: number) { setFormArgs((p) => (p.length > 1 ? p.filter((_, idx) => idx !== i) : [""])); }
   function addEnv() { setFormEnv((p) => [...p, { key: "", value: "" }]); }
-  function setEnvKey(i: number, k: string) { setFormEnv((p) => p.map((e, idx) => idx === i ? { ...e, key: k } : e)); }
-  function setEnvVal(i: number, v: string) { setFormEnv((p) => p.map((e, idx) => idx === i ? { ...e, value: v } : e)); }
+  function setEnvKey(i: number, k: string) { setFormEnv((p) => p.map((e, idx) => (idx === i ? { ...e, key: k } : e))); }
+  function setEnvVal(i: number, v: string) { setFormEnv((p) => p.map((e, idx) => (idx === i ? { ...e, value: v } : e))); }
   function removeEnv(i: number) { setFormEnv((p) => p.filter((_, idx) => idx !== i)); }
 
   return (
@@ -142,21 +209,56 @@ export function DiscoverView() {
         </div>
       </div>
 
+      <div className="filter-bar">
+        <div className="filter-group">
+          <span className="filter-label">Source</span>
+          {([
+            ["all", `All (${servers.length})`],
+            ["official", `Official (${officialCount})`],
+            ["smithery", `Smithery (${smitheryCount})`],
+          ] as [SourceFilter, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              className={`filter-chip ${sourceFilter === val ? "active" : ""}`}
+              onClick={() => setSourceFilter(val)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="filter-group">
+          <span className="filter-label">Type</span>
+          {([
+            ["all", "All"],
+            ["local", "Local"],
+            ["remote", "Remote"],
+          ] as [RuntimeFilter, string][]).map(([val, label]) => (
+            <button
+              key={val}
+              className={`filter-chip ${runtimeFilter === val ? "active" : ""}`}
+              onClick={() => setRuntimeFilter(val)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {filtered.length !== servers.length && (
+          <span className="filter-result-count">{filtered.length} results</span>
+        )}
+      </div>
+
       {showForm && (
         <div className="modal-overlay" onClick={closeForm}>
           <div className="modal manual-add-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Add Server Manually</h3>
-
             <label>
               Name
               <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="my-server" />
             </label>
-
             <label>
               Command
               <input value={formCommand} onChange={(e) => setFormCommand(e.target.value)} placeholder="npx" />
             </label>
-
             <div className="form-section">
               <div className="form-section-header">
                 <span className="form-section-label">Args</span>
@@ -176,7 +278,6 @@ export function DiscoverView() {
                 ))}
               </div>
             </div>
-
             <div className="form-section">
               <div className="form-section-header">
                 <span className="form-section-label">Env Vars</span>
@@ -206,7 +307,6 @@ export function DiscoverView() {
                 </div>
               )}
             </div>
-
             <div className="modal-actions">
               <button className="btn secondary" onClick={closeForm}>Cancel</button>
               <button className="btn primary" onClick={handleManualAdd}>Add to Master</button>
@@ -215,44 +315,49 @@ export function DiscoverView() {
         </div>
       )}
 
-      {loading && <div className="loading">Loading official MCP servers...</div>}
+      {loading && <div className="loading">Loading servers...</div>}
       {error && <div className="error"><AlertCircle size={16} /> {error}</div>}
 
       <div className="registry-grid">
         {filtered.map((s) => {
-          const isAdded = added.has(s.name);
-          const busy = addingName === s.name;
-          const isNpx = s.runtime === "npx";
+          const isAdded = added.has(s.id);
+          const busy = addingId === s.id;
+          const canAdd = s.runtime !== "remote";
           return (
-            <div key={s.name} className="registry-card">
+            <div key={s.id} className="registry-card">
               <div className="registry-card-header">
-                <span className="registry-name">{s.name}</span>
-                {isNpx ? (
-                  <span className="badge local" title="Install via npx">npm</span>
-                ) : (
-                  <span className="badge remote" title="Install via uvx (Python)">Python</span>
-                )}
+                <span className="registry-name">{s.displayName}</span>
+                <div className="registry-badges">
+                  <span
+                    className={`badge ${s.source === "official" ? "official" : "smithery"}`}
+                    title={s.source === "official" ? "Anthropic official reference server" : "Smithery registry"}
+                  >
+                    {s.source === "official" ? "Official" : "Smithery"}
+                  </span>
+                  <span
+                    className={`badge ${s.runtime === "npx" ? "local" : s.runtime === "uvx" ? "python" : "remote"}`}
+                  >
+                    {s.runtime}
+                  </span>
+                </div>
               </div>
-              <p className="registry-desc">{s.description || "Official MCP server"}</p>
-              <div className="registry-publisher">
-                {isNpx ? `npx -y ${s.packageName}` : `uvx ${s.packageName}`}
-              </div>
+              <p className="registry-desc">{s.description || "MCP server"}</p>
+              <div className="registry-publisher">{s.packageName}</div>
               <div className="registry-actions">
                 <button
                   className={`btn ${isAdded ? "secondary" : "primary"}`}
-                  disabled={busy || isAdded}
+                  disabled={!canAdd || busy || isAdded}
                   onClick={() => handleAdd(s)}
+                  title={!canAdd ? "Remote server — cannot be installed locally" : undefined}
                 >
                   <Plus size={14} />
-                  {busy ? "Adding…" : isAdded ? "Added" : "Add to Master"}
+                  {busy ? "Adding…" : isAdded ? "Added" : canAdd ? "Add to Master" : "Remote Only"}
                 </button>
-                <button
-                  className="icon-btn"
-                  title="Open on GitHub"
-                  onClick={() => openUrl(`${GH_TREE}/${s.name}`)}
-                >
-                  <ExternalLink size={14} />
-                </button>
+                {s.homepage && (
+                  <button className="icon-btn" title="Open homepage" onClick={() => openUrl(s.homepage!)}>
+                    <ExternalLink size={14} />
+                  </button>
+                )}
               </div>
             </div>
           );
