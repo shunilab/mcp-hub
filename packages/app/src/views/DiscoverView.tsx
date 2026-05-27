@@ -189,18 +189,22 @@ export function DiscoverView() {
 
   async function handleManualAdd() {
     const errs: typeof formErrors = {};
-    if (!formName.trim()) errs.name = "名前は必須です";
-    if (!formCommand.trim()) errs.command = "コマンドは必須です";
+    const nameVal = formName.trim();
+    const commandVal = formCommand.trim();
+    if (!nameVal) errs.name = "名前は必須です";
+    else if (!/^[a-zA-Z0-9_-]+$/.test(nameVal)) errs.name = "英数字・ハイフン・アンダースコアのみ使用できます";
+    if (!commandVal) errs.command = "コマンドは必須です";
     if (Object.keys(errs).length) { setFormErrors(errs); return; }
     setFormErrors({});
     setFormSubmitting(true);
     try {
       const args = formArgs.map((a) => a.trim()).filter(Boolean);
       const env = formEnv.reduce<Record<string, string>>((acc, { key, value }) => {
-        if (key.trim()) acc[key.trim()] = value;
+        const k = key.trim();
+        if (k && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) acc[k] = value;
         return acc;
       }, {});
-      await addServer(formName.trim(), { command: formCommand.trim(), args, env: Object.keys(env).length ? env : undefined });
+      await addServer(nameVal, { command: commandVal, args, env: Object.keys(env).length ? env : undefined });
       closeForm();
     } catch (e) {
       setFormErrors({ submit: String(e) });
@@ -412,7 +416,7 @@ export function DiscoverView() {
                   <Plus size={14} />
                   {busy ? "Adding…" : isAdded ? "Added" : canAdd ? "Add to Master" : "Remote Only"}
                 </button>
-                {s.homepage && (
+                {s.homepage && /^https?:\/\//.test(s.homepage) && (
                   <button className="icon-btn" aria-label={`${s.displayName} のホームページを開く`} title="Open homepage" onClick={() => openUrl(s.homepage!)}>
                     <ExternalLink size={14} />
                   </button>

@@ -20,7 +20,13 @@ export function createJsonMcpServersAdapter(
     read(): Record<string, McpServer> | null {
       const p = this.configPath();
       if (!fs.existsSync(p)) return null;
-      const raw = JSON.parse(fs.readFileSync(p, "utf-8"));
+      let raw: Record<string, unknown>;
+      try {
+        raw = JSON.parse(fs.readFileSync(p, "utf-8"));
+      } catch {
+        console.error(`Warning: ${p} is corrupted. Skipping read.`);
+        return null;
+      }
       return (raw.mcpServers as Record<string, McpServer>) ?? {};
     },
 
@@ -28,7 +34,11 @@ export function createJsonMcpServersAdapter(
       const p = this.configPath();
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(p)) {
-        existing = JSON.parse(fs.readFileSync(p, "utf-8"));
+        try {
+          existing = JSON.parse(fs.readFileSync(p, "utf-8"));
+        } catch {
+          console.error(`Warning: ${p} is corrupted. Overwriting with new content.`);
+        }
       }
       existing.mcpServers = servers;
       return safeWrite(p, JSON.stringify(existing, null, 2));

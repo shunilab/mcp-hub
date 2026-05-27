@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
@@ -173,16 +173,6 @@ export function LibraryView() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, []);
 
-  // Keyboard shortcuts: Cmd+Z = undo, Cmd+R = refresh
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === "r") { e.preventDefault(); load(); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  });
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -240,7 +230,10 @@ export function LibraryView() {
     }
   }
 
+  const syncingRef = useRef(false);
+
   async function handleDrop(to: string) {
+    if (syncingRef.current) return;
     if (draggingCol) {
       const fromCol = draggingCol;
       setDraggingCol(null);
@@ -274,6 +267,7 @@ export function LibraryView() {
       const keys = Object.keys(servers).filter((k) => k !== name);
       const insertIdx = indicator.beforeName ? keys.indexOf(indicator.beforeName) : keys.length;
       keys.splice(insertIdx, 0, name);
+      syncingRef.current = true;
       setSyncing(true);
       try {
         await reorderServers(to, keys);
@@ -281,12 +275,14 @@ export function LibraryView() {
       } catch (e) {
         setError(String(e));
       } finally {
+        syncingRef.current = false;
         setSyncing(false);
       }
       return;
     }
 
     // Inter-column: sync (copy) + optionally remove (move)
+    syncingRef.current = true;
     setSyncing(true);
     try {
       await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name);
@@ -297,6 +293,7 @@ export function LibraryView() {
     } catch (e) {
       setError(String(e));
     } finally {
+      syncingRef.current = false;
       setSyncing(false);
     }
   }
@@ -321,14 +318,24 @@ export function LibraryView() {
 
   // ── undo ─────────────────────────────────────────────────────────────────
 
-  async function handleUndo() {
+  const handleUndo = useCallback(async () => {
     try {
       await undoLast();
       await load();
     } catch (e) {
       setError(String(e));
     }
-  }
+  }, [load]);
+
+  // Keyboard shortcuts: Cmd+Z = undo, Cmd+R = refresh
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "r") { e.preventDefault(); load(); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [load, handleUndo]);
 
   // ── sync all ─────────────────────────────────────────────────────────────
 

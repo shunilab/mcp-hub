@@ -11,7 +11,13 @@ const EMPTY_CONFIG: HubConfig = { version: 1, mcpServers: {} };
 
 export function loadHub(): HubConfig {
   if (!fs.existsSync(HUB_FILE)) return { ...EMPTY_CONFIG, mcpServers: {} };
-  const raw = JSON.parse(fs.readFileSync(HUB_FILE, "utf-8"));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(HUB_FILE, "utf-8"));
+  } catch {
+    console.error(`Warning: ${HUB_FILE} is corrupted. Starting with empty config.`);
+    return { ...EMPTY_CONFIG, mcpServers: {} };
+  }
   return HubConfigSchema.parse(raw);
 }
 

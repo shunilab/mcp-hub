@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { runCli, installCli, uninstallCli, cliInstallStatus, saveClientPaths } from "../hooks/useCli";
 import { Save, Terminal, Check, X, RotateCcw } from "lucide-react";
 
@@ -12,10 +12,15 @@ export function SettingsView() {
   const [paths, setPaths] = useState<ClientPath[]>([]);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [cliInstalled, setCliInstalled] = useState<boolean | null>(null);
   const [cliInstallPath, setCliInstallPath] = useState<string | null>(null);
   const [cliLoading, setCliLoading] = useState(false);
   const [cliError, setCliError] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); };
+  }, []);
 
   useEffect(() => {
     runCli(["status", "--json"])
@@ -44,7 +49,8 @@ export function SettingsView() {
       const overrides = Object.fromEntries(changed.map((p) => [p.name, p.path]));
       await saveClientPaths(overrides);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
     } catch (e) {
       setCliError(String(e));
     } finally {

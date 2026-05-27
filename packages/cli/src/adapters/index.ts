@@ -34,18 +34,29 @@ const BUILT_IN_ADAPTERS: Adapter[] = [
 
 function loadUserAdapters(): Adapter[] {
   if (!fs.existsSync(CLIENTS_FILE)) return [];
-  const raw = JSON.parse(fs.readFileSync(CLIENTS_FILE, "utf-8"));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(CLIENTS_FILE, "utf-8"));
+  } catch {
+    console.error(`Warning: ${CLIENTS_FILE} is corrupted. Skipping user adapters.`);
+    return [];
+  }
   const userClients = UserClientsSchema.parse(raw);
-  return Object.entries(userClients).map(([name, cfg]) => {
+  return Object.entries(userClients).flatMap(([name, cfg]) => {
     const platform = process.platform as "darwin" | "win32";
     const rawPath = typeof cfg.configPath === "string"
       ? cfg.configPath
       : cfg.configPath[platform] ?? (cfg.configPath as Record<string, string>).darwin;
 
-    return createJsonMcpServersAdapter(name, {
+    if (!rawPath) {
+      console.error(`Warning: No configPath for client "${name}" on platform "${platform}". Skipping.`);
+      return [];
+    }
+
+    return [createJsonMcpServersAdapter(name, {
       darwin: rawPath,
       win32: rawPath,
-    });
+    })];
   });
 }
 
