@@ -474,7 +474,25 @@ export function LibraryView() {
   // ── render ────────────────────────────────────────────────────────────────
 
   if (loading && !data) return <div className="loading" role="status">Loading...</div>;
-  if (!data) return null;
+  if (!data) {
+    return (
+      <div className="library-view">
+        <div className="toolbar">
+          <h2>Library</h2>
+          <div className="toolbar-actions">
+            <button className="btn secondary" onClick={load}><RefreshCw size={14} /> Retry</button>
+          </div>
+        </div>
+        {error && (
+          <div className="error-banner" role="alert">
+            <AlertCircle size={16} />
+            <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
+            <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const orderedClients = clientOrder
     .map((name) => data.clients.find((c) => c.name === name))

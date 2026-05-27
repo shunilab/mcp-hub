@@ -13,12 +13,16 @@ fn run_cli(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
         .args(&args)
         .env("PATH", expanded_path())
         .output()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("spawn failed: {} (node={:?}, cli={:?})", e, node, cli))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!(
+            "CLI exited with status {}:\n{}",
+            output.status, stderr
+        ))
     }
 }
 
@@ -33,12 +37,14 @@ fn install_cli(app: tauri::AppHandle) -> Result<String, String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
+    let cli_path = strip_windows_verbatim(&cli_resource.to_string_lossy());
+
     #[cfg(windows)]
     {
         let bat = format!(
             "@echo off\r\n\"{}\" \"{}\" %*\r\n",
             node,
-            cli_resource.display()
+            cli_path
         );
         std::fs::write(&install_path, bat)
             .map_err(|e| format!("Failed to write {}: {}", install_path.display(), e))?;
@@ -49,7 +55,7 @@ fn install_cli(app: tauri::AppHandle) -> Result<String, String> {
         let sh = format!(
             "#!/bin/sh\nexec '{}' '{}' \"$@\"\n",
             node,
-            cli_resource.display()
+            cli_path
         );
         std::fs::write(&install_path, sh)
             .map_err(|e| format!("Failed to write {}: {}", install_path.display(), e))?;
@@ -116,13 +122,13 @@ fn bundled_cli_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 fn find_cli(app: &tauri::AppHandle) -> Option<String> {
     // 1. Bundled resource (production)
     if let Some(p) = bundled_cli_path(app) {
-        return Some(p.to_string_lossy().to_string());
+        return Some(strip_windows_verbatim(&p.to_string_lossy()));
     }
 
     // 2. Env var override
     if let Ok(path) = std::env::var("MCP_HUB_CLI") {
         if std::path::Path::new(&path).exists() {
-            return Some(path);
+            return Some(strip_windows_verbatim(&path));
         }
     }
 
@@ -135,7 +141,7 @@ fn find_cli(app: &tauri::AppHandle) -> Option<String> {
         {
             let cli = root.join("packages").join("cli").join("dist").join("index.js");
             if cli.exists() {
-                return Some(cli.to_string_lossy().to_string());
+                return Some(strip_windows_verbatim(&cli.to_string_lossy()));
             }
         }
     }
@@ -144,11 +150,32 @@ fn find_cli(app: &tauri::AppHandle) -> Option<String> {
     if let Some(home) = dirs::home_dir() {
         let cli = home.join(".mcp-hub").join("cli").join("index.js");
         if cli.exists() {
-            return Some(cli.to_string_lossy().to_string());
+            return Some(strip_windows_verbatim(&cli.to_string_lossy()));
         }
     }
 
     None
+}
+
+/// Strip Windows verbatim path prefix `\\?\` if present.
+///
+/// Tauri's resource resolver canonicalizes paths and returns them with the
+/// `\\?\` extended-length prefix on Windows. Node.js's `Module._findPath`
+/// does not handle this prefix and ends up resolving the path to just `C:`,
+/// throwing `EISDIR: illegal operation on a directory, lstat 'C:'`. The
+/// prefix is unnecessary unless the path exceeds MAX_PATH (260 chars), so
+/// we strip it for all paths we hand to external tools.
+fn strip_windows_verbatim(p: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", rest);
+        }
+        if let Some(rest) = p.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    p.to_string()
 }
 
 fn expanded_path() -> String {

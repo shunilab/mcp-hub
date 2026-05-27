@@ -6,13 +6,19 @@ const BACKUP_DIR = path.join(os.homedir(), ".mcp-hub", "backups");
 const BACKUP_TTL_DAYS = 7;
 
 export function resolvePath(p: string): string {
-  if (p.startsWith("~")) return path.join(os.homedir(), p.slice(1));
-  if (process.platform === "win32") {
-    return p
-      .replace(/%APPDATA%/gi, process.env.APPDATA ?? "")
-      .replace(/%USERPROFILE%/gi, os.homedir());
+  let resolved = p;
+  if (resolved.startsWith("~")) {
+    resolved = path.join(os.homedir(), resolved.slice(1));
   }
-  return p;
+  if (process.platform === "win32") {
+    resolved = resolved
+      .replace(/%APPDATA%/gi, process.env.APPDATA ?? "")
+      .replace(/%LOCALAPPDATA%/gi, process.env.LOCALAPPDATA ?? "")
+      .replace(/%USERPROFILE%/gi, os.homedir());
+    // Normalize separators so the UI shows consistent backslashes on Windows.
+    return path.win32.normalize(resolved.replace(/\//g, "\\"));
+  }
+  return resolved;
 }
 
 function ensureDir(dir: string) {
