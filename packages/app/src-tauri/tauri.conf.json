@@ -40,7 +40,7 @@
   },
   "plugins": {
     "shell": {
-      "open": true
+      "open": ".*"
     }
   }
 }

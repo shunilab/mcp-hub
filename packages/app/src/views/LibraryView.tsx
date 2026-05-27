@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { open } from "@tauri-apps/plugin-shell";
 import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -322,7 +322,7 @@ export function LibraryView() {
   // ── open in editor / copy path ───────────────────────────────────────────
 
   async function openInEditor(configPath: string) {
-    try { await openPath(configPath); } catch (e) { setError(String(e)); }
+    try { await open(configPath); } catch (e) { setError(String(e)); }
   }
 
   async function copyPath(configPath: string) {
