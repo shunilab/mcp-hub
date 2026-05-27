@@ -15,12 +15,14 @@ const NAV: { id: View; icon: React.ReactNode; label: string }[] = [
 
 export function Sidebar({ current, onChange }: Props) {
   return (
-    <nav className="sidebar">
+    <nav className="sidebar" aria-label="メインナビゲーション">
       {NAV.map(({ id, icon, label }) => (
         <button
           key={id}
           className={`nav-item ${current === id ? "active" : ""}`}
           onClick={() => onChange(id)}
+          aria-label={label}
+          aria-current={current === id ? "page" : undefined}
           title={label}
         >
           {icon}

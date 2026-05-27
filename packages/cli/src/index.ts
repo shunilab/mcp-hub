@@ -8,6 +8,7 @@ import { list } from "./commands/list.js";
 import { importFrom } from "./commands/import.js";
 import { status } from "./commands/status.js";
 import { undo } from "./commands/undo.js";
+import { configSetPath } from "./commands/config.js";
 import { pruneOldBackups } from "./utils/fs.js";
 
 pruneOldBackups();
@@ -68,5 +69,14 @@ program
   .command("undo")
   .description("Restore the most recently modified file from backup")
   .action(undo);
+
+const configCmd = program
+  .command("config")
+  .description("Manage MCPHub configuration");
+
+configCmd
+  .command("set-path <client> <path>")
+  .description("Override the config file path for a client")
+  .action(configSetPath);
 
 program.parse();

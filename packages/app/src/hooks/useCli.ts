@@ -81,3 +81,9 @@ export async function uninstallCli(): Promise<void> {
 export async function cliInstallStatus(): Promise<boolean> {
   return invoke<boolean>("cli_install_status");
 }
+
+export async function saveClientPaths(overrides: Record<string, string>): Promise<void> {
+  for (const [client, p] of Object.entries(overrides)) {
+    await runCli(["config", "set-path", client, p]);
+  }
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export interface MenuAction {
   label: string;
@@ -8,7 +8,7 @@ export interface MenuAction {
   onClick: () => void;
 }
 
-export type MenuItem = MenuAction | "separator";
+export type MenuItem = MenuAction | { type: "header"; label: string } | "separator";
 
 interface Props {
   x: number;
@@ -19,41 +19,78 @@ interface Props {
 
 export function ContextMenu({ x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+
+  // Adjust position after render so menu stays on-screen
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { width, height } = el.getBoundingClientRect();
+    setPos({
+      left: Math.min(x, window.innerWidth - width - 8),
+      top: Math.min(y, window.innerHeight - height - 8),
+    });
+  }, [x, y]);
+
+  // Focus first interactive item on mount
+  useEffect(() => {
+    const first = itemRefs.current.find((el) => el && !el.disabled);
+    first?.focus();
+  }, []);
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const mouseHandler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    const keyHandler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("mousedown", handler);
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { onClose(); return; }
+
+      const focusable = itemRefs.current.filter((el) => el && !el.disabled) as HTMLButtonElement[];
+      const cur = document.activeElement as HTMLButtonElement;
+      const idx = focusable.indexOf(cur);
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusable[(idx + 1) % focusable.length]?.focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusable[(idx - 1 + focusable.length) % focusable.length]?.focus();
+      } else if (e.key === "Enter" && cur) {
+        e.preventDefault();
+        cur.click();
+      }
+    };
+    window.addEventListener("mousedown", mouseHandler);
     window.addEventListener("keydown", keyHandler);
     return () => {
-      window.removeEventListener("mousedown", handler);
+      window.removeEventListener("mousedown", mouseHandler);
       window.removeEventListener("keydown", keyHandler);
     };
   }, [onClose]);
 
-  // Adjust position so menu doesn't go off-screen
-  const style: React.CSSProperties = {
-    position: "fixed",
-    left: Math.min(x, window.innerWidth - 200),
-    top: Math.min(y, window.innerHeight - items.length * 34),
-    zIndex: 1000,
-  };
+  let btnIdx = 0;
 
   return (
-    <div ref={ref} className="context-menu" style={style}>
+    <div ref={ref} className="context-menu" role="menu" style={{ position: "fixed", ...pos, zIndex: 1000 }}>
       {items.map((item, i) => {
-        if (item === "separator") return <div key={i} className="ctx-separator" />;
+        if (item === "separator") return <div key={i} className="ctx-separator" role="separator" />;
+        if ("type" in item && item.type === "header") {
+          return <div key={i} className="ctx-header" role="presentation">{item.label}</div>;
+        }
+        const action = item as MenuAction;
+        const idx = btnIdx++;
         return (
           <button
             key={i}
-            className={`ctx-item ${item.danger ? "danger" : ""}`}
-            disabled={item.disabled}
-            onClick={() => { onClose(); item.onClick(); }}
+            ref={(el) => { itemRefs.current[idx] = el; }}
+            className={`ctx-item ${action.danger ? "danger" : ""}`}
+            role="menuitem"
+            disabled={action.disabled}
+            onClick={() => { onClose(); action.onClick(); }}
           >
-            {item.icon && <span className="ctx-icon">{item.icon}</span>}
-            {item.label}
+            {action.icon && <span className="ctx-icon" aria-hidden="true">{action.icon}</span>}
+            {action.label}
           </button>
         );
       })}

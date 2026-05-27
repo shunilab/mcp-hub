@@ -65,9 +65,9 @@ async function fetchOfficial(): Promise<DiscoverServer[]> {
     })
   );
 
-  return results
-    .filter((r): r is PromiseFulfilledResult<DiscoverServer> => r.status === "fulfilled" && r.value !== null)
-    .map((r) => r.value);
+  return results.flatMap((r) =>
+    r.status === "fulfilled" && r.value !== null ? [r.value as DiscoverServer] : []
+  );
 }
 
 async function fetchSmithery(): Promise<DiscoverServer[]> {
@@ -107,6 +107,7 @@ export function DiscoverView() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("local");
 
+  const [fetchWarning, setFetchWarning] = useState<string | null>(null);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
@@ -116,23 +117,32 @@ export function DiscoverView() {
   const [formCommand, setFormCommand] = useState("npx");
   const [formArgs, setFormArgs] = useState<string[]>([""]);
   const [formEnv, setFormEnv] = useState<{ key: string; value: string }[]>([]);
+  const [formErrors, setFormErrors] = useState<{ name?: string; command?: string; submit?: string }>({});
+  const [formSubmitting, setFormSubmitting] = useState(false);
 
-  useEffect(() => {
-    Promise.allSettled([fetchOfficial(), fetchSmithery()]).then(([officialRes, smitheryRes]) => {
-      const official = officialRes.status === "fulfilled" ? officialRes.value : [];
-      const smithery = smitheryRes.status === "fulfilled" ? smitheryRes.value : [];
+  async function loadServers() {
+    setLoading(true);
+    setError(null);
+    setFetchWarning(null);
+    const [officialRes, smitheryRes] = await Promise.allSettled([fetchOfficial(), fetchSmithery()]);
+    const official = officialRes.status === "fulfilled" ? officialRes.value : [];
+    const smithery = smitheryRes.status === "fulfilled" ? smitheryRes.value : [];
 
-      // Deduplicate: official takes precedence over smithery entries with same packageName
-      const seen = new Set(official.map((s) => s.packageName));
-      const deduped = smithery.filter((s) => !seen.has(s.packageName));
+    const seen = new Set(official.map((s) => s.packageName));
+    const deduped = smithery.filter((s) => !seen.has(s.packageName));
+    setServers([...official, ...deduped]);
+    setLoading(false);
 
-      setServers([...official, ...deduped]);
-      setLoading(false);
-      if (officialRes.status === "rejected" && smitheryRes.status === "rejected") {
-        setError("Failed to load servers");
-      }
-    });
-  }, []);
+    if (officialRes.status === "rejected" && smitheryRes.status === "rejected") {
+      setError("Failed to load servers");
+    } else if (officialRes.status === "rejected") {
+      setFetchWarning("Official servers could not be loaded");
+    } else if (smitheryRes.status === "rejected") {
+      setFetchWarning("Smithery servers could not be loaded");
+    }
+  }
+
+  useEffect(() => { loadServers(); }, []);
 
   const officialCount = servers.filter((s) => s.source === "official").length;
   const smitheryCount = servers.filter((s) => s.source === "smithery").length;
@@ -160,6 +170,8 @@ export function DiscoverView() {
         await addServer(name, { command: "uvx", args: [s.packageName] });
       }
       setAdded((prev) => new Set([...prev, s.id]));
+    } catch (e) {
+      setError(`追加に失敗しました: ${String(e)}`);
     } finally {
       setAddingId(null);
     }
@@ -171,17 +183,30 @@ export function DiscoverView() {
     setFormCommand("npx");
     setFormArgs([""]);
     setFormEnv([]);
+    setFormErrors({});
+    setFormSubmitting(false);
   }
 
   async function handleManualAdd() {
-    if (!formName || !formCommand) return;
-    const args = formArgs.map((a) => a.trim()).filter(Boolean);
-    const env = formEnv.reduce<Record<string, string>>((acc, { key, value }) => {
-      if (key.trim()) acc[key.trim()] = value;
-      return acc;
-    }, {});
-    await addServer(formName, { command: formCommand, args, env: Object.keys(env).length ? env : undefined });
-    closeForm();
+    const errs: typeof formErrors = {};
+    if (!formName.trim()) errs.name = "名前は必須です";
+    if (!formCommand.trim()) errs.command = "コマンドは必須です";
+    if (Object.keys(errs).length) { setFormErrors(errs); return; }
+    setFormErrors({});
+    setFormSubmitting(true);
+    try {
+      const args = formArgs.map((a) => a.trim()).filter(Boolean);
+      const env = formEnv.reduce<Record<string, string>>((acc, { key, value }) => {
+        if (key.trim()) acc[key.trim()] = value;
+        return acc;
+      }, {});
+      await addServer(formName.trim(), { command: formCommand.trim(), args, env: Object.keys(env).length ? env : undefined });
+      closeForm();
+    } catch (e) {
+      setFormErrors({ submit: String(e) });
+    } finally {
+      setFormSubmitting(false);
+    }
   }
 
   function addArg() { setFormArgs((p) => [...p, ""]); }
@@ -200,6 +225,7 @@ export function DiscoverView() {
           <input
             className="search-input"
             placeholder="Search servers..."
+            aria-label="サーバーを検索"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -248,16 +274,28 @@ export function DiscoverView() {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={closeForm}>
-          <div className="modal manual-add-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" role="presentation" onClick={closeForm} onKeyDown={(e) => e.key === "Escape" && closeForm()}>
+          <div className="modal manual-add-modal" role="dialog" aria-modal="true" aria-label="Add Server Manually" onClick={(e) => e.stopPropagation()}>
             <h3>Add Server Manually</h3>
             <label>
               Name
-              <input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="my-server" />
+              <input
+                value={formName}
+                onChange={(e) => { setFormName(e.target.value); setFormErrors((p) => ({ ...p, name: undefined })); }}
+                placeholder="my-server"
+                aria-invalid={!!formErrors.name}
+              />
+              {formErrors.name && <p className="field-error">{formErrors.name}</p>}
             </label>
             <label>
               Command
-              <input value={formCommand} onChange={(e) => setFormCommand(e.target.value)} placeholder="npx" />
+              <input
+                value={formCommand}
+                onChange={(e) => { setFormCommand(e.target.value); setFormErrors((p) => ({ ...p, command: undefined })); }}
+                placeholder="npx"
+                aria-invalid={!!formErrors.command}
+              />
+              {formErrors.command && <p className="field-error">{formErrors.command}</p>}
             </label>
             <div className="form-section">
               <div className="form-section-header">
@@ -307,16 +345,37 @@ export function DiscoverView() {
                 </div>
               )}
             </div>
+            {formErrors.submit && <p className="field-error submit-error">{formErrors.submit}</p>}
             <div className="modal-actions">
-              <button className="btn secondary" onClick={closeForm}>Cancel</button>
-              <button className="btn primary" onClick={handleManualAdd}>Add to Master</button>
+              <button className="btn secondary" autoFocus onClick={closeForm}>Cancel</button>
+              <button className="btn primary" disabled={formSubmitting} onClick={handleManualAdd}>
+                {formSubmitting ? "Adding…" : "Add to Master"}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {loading && <div className="loading">Loading servers...</div>}
-      {error && <div className="error"><AlertCircle size={16} /> {error}</div>}
+      {loading && <div className="loading" role="status">Loading servers...</div>}
+      {error && (
+        <div className="error-banner" role="alert">
+          <AlertCircle size={16} />
+          {error}
+          <button className="btn secondary small" onClick={loadServers}>Retry</button>
+          <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>✕</span>
+          </button>
+        </div>
+      )}
+      {fetchWarning && (
+        <div className="warn-banner" role="status">
+          <AlertCircle size={16} />
+          {fetchWarning}
+          <button className="icon-btn" aria-label="閉じる" onClick={() => setFetchWarning(null)}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>✕</span>
+          </button>
+        </div>
+      )}
 
       <div className="registry-grid">
         {filtered.map((s) => {
@@ -354,7 +413,7 @@ export function DiscoverView() {
                   {busy ? "Adding…" : isAdded ? "Added" : canAdd ? "Add to Master" : "Remote Only"}
                 </button>
                 {s.homepage && (
-                  <button className="icon-btn" title="Open homepage" onClick={() => openUrl(s.homepage!)}>
+                  <button className="icon-btn" aria-label={`${s.displayName} のホームページを開く`} title="Open homepage" onClick={() => openUrl(s.homepage!)}>
                     <ExternalLink size={14} />
                   </button>
                 )}

@@ -7,6 +7,7 @@ import { opencodeAdapter } from "./opencode.js";
 import { codexAdapter } from "./codex.js";
 import { UserClients, UserClientsSchema } from "../types.js";
 import { resolvePath } from "../utils/fs.js";
+import { loadOverrides } from "../commands/config.js";
 
 const CLIENTS_FILE = path.join(os.homedir(), ".mcp-hub", "clients.json");
 
@@ -49,7 +50,14 @@ function loadUserAdapters(): Adapter[] {
 }
 
 export function getAllAdapters(): Adapter[] {
-  return [...BUILT_IN_ADAPTERS, ...loadUserAdapters()];
+  const overrides = loadOverrides();
+  const base = [...BUILT_IN_ADAPTERS, ...loadUserAdapters()];
+  return base.map((adapter) => {
+    const override = overrides[adapter.name];
+    if (!override) return adapter;
+    const resolvedOverride = resolvePath(override);
+    return { ...adapter, configPath: () => resolvedOverride };
+  });
 }
 
 export function getAdapter(name: string): Adapter | undefined {

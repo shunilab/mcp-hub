@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { runCli, installCli, uninstallCli, cliInstallStatus } from "../hooks/useCli";
+import { runCli, installCli, uninstallCli, cliInstallStatus, saveClientPaths } from "../hooks/useCli";
 import { Save, Terminal, Check, X, RotateCcw } from "lucide-react";
 
 interface ClientPath {
@@ -35,9 +35,21 @@ export function SettingsView() {
     cliInstallStatus().then(setCliInstalled);
   }, []);
 
-  function handleSave() {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  async function handleSave() {
+    const changed = paths.filter((p) => p.path !== p.defaultPath);
+    if (!changed.length) return;
+    setCliLoading(true);
+    setCliError(null);
+    try {
+      const overrides = Object.fromEntries(changed.map((p) => [p.name, p.path]));
+      await saveClientPaths(overrides);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setCliError(String(e));
+    } finally {
+      setCliLoading(false);
+    }
   }
 
   async function handleInstallCli() {
@@ -140,7 +152,11 @@ export function SettingsView() {
             </div>
           ))}
         </div>
-        <button className="btn primary" onClick={handleSave}>
+        <button
+          className="btn primary"
+          onClick={handleSave}
+          disabled={cliLoading || paths.every((p) => p.path === p.defaultPath)}
+        >
           <Save size={14} /> {saved ? "Saved!" : "Save"}
         </button>
       </section>

@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, AlertCircle, X } from "lucide-react";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -109,12 +109,12 @@ function Column({
         <span className="column-title">{title}</span>
         <span className="column-count">{Object.keys(servers).length}</span>
         {onMoveLeft && (
-          <button className="icon-btn" title="Move left" onClick={onMoveLeft}>
+          <button className="icon-btn" aria-label="左に移動" title="Move left" onClick={onMoveLeft}>
             <ArrowLeft size={14} />
           </button>
         )}
         {onMoveRight && (
-          <button className="icon-btn" title="Move right" onClick={onMoveRight}>
+          <button className="icon-btn" aria-label="右に移動" title="Move right" onClick={onMoveRight}>
             <ArrowRight size={14} />
           </button>
         )}
@@ -138,7 +138,11 @@ function Column({
           <div className="drop-indicator" />
         )}
         {Object.keys(servers).length === 0 && (
-          <div className="column-empty">Drop servers here</div>
+          <div className="column-empty">
+            {isMaster
+              ? <><strong>No servers yet.</strong><br />Use Discover to add your first server.</>
+              : "Drop servers here to sync from Master"}
+          </div>
         )}
       </div>
     </div>
@@ -150,6 +154,7 @@ function Column({
 export function LibraryView() {
   const [data, setData] = useState<StatusResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
@@ -269,16 +274,20 @@ export function LibraryView() {
       const keys = Object.keys(servers).filter((k) => k !== name);
       const insertIdx = indicator.beforeName ? keys.indexOf(indicator.beforeName) : keys.length;
       keys.splice(insertIdx, 0, name);
+      setSyncing(true);
       try {
         await reorderServers(to, keys);
         await load();
       } catch (e) {
         setError(String(e));
+      } finally {
+        setSyncing(false);
       }
       return;
     }
 
     // Inter-column: sync (copy) + optionally remove (move)
+    setSyncing(true);
     try {
       await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name);
       if (!copyMode) {
@@ -287,6 +296,8 @@ export function LibraryView() {
       await load();
     } catch (e) {
       setError(String(e));
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -319,6 +330,24 @@ export function LibraryView() {
     }
   }
 
+  // ── sync all ─────────────────────────────────────────────────────────────
+
+  function handleSyncAll() {
+    setConfirm({
+      message: "Master の全サーバーを全クライアントに同期します。各クライアントの既存設定は上書きされます。続けますか？",
+      confirmLabel: "Sync",
+      onConfirm: async () => {
+        setConfirm(null);
+        try {
+          await syncFromTo(undefined, undefined);
+          await load();
+        } catch (e) {
+          setError(String(e));
+        }
+      },
+    });
+  }
+
   // ── open in editor / copy path ───────────────────────────────────────────
 
   async function openInEditor(configPath: string) {
@@ -335,12 +364,7 @@ export function LibraryView() {
     if (!data) return;
     const otherClients = data.clients.filter((c) => c.name !== columnId);
     const items: MenuItem[] = [
-      {
-        label: isCopyMode ? "Copy to..." : "Move to...",
-        disabled: true,
-        onClick: () => {},
-      },
-      "separator",
+      { type: "header", label: isCopyMode ? "Copy to..." : "Move to..." },
       ...data.clients
         .filter((c) => c.name !== columnId)
         .map((c) => ({
@@ -442,8 +466,7 @@ export function LibraryView() {
 
   // ── render ────────────────────────────────────────────────────────────────
 
-  if (loading) return <div className="loading">Loading...</div>;
-  if (error) return <div className="error">{error}</div>;
+  if (loading && !data) return <div className="loading" role="status">Loading...</div>;
   if (!data) return null;
 
   const orderedClients = clientOrder
@@ -454,14 +477,26 @@ export function LibraryView() {
     <div className="library-view">
       <div className="toolbar">
         <h2>Library</h2>
-        {isCopyMode && <span className="copy-mode-badge">Copy mode</span>}
+        {isCopyMode
+          ? <span className="copy-mode-badge">Copy mode</span>
+          : <span className="kbd-hint"><kbd>⌘</kbd>を押しながらドラッグでコピー</span>
+        }
         <div className="toolbar-actions">
           <button className="btn secondary" onClick={handleUndo}><Undo2 size={14} /> Undo</button>
           <button className="btn secondary" onClick={load}><RefreshCw size={14} /> Refresh</button>
+          <button className="btn primary" onClick={handleSyncAll}><ArrowDownToLine size={14} /> Sync All</button>
         </div>
       </div>
 
-      <div className="columns-scroll">
+      {error && (
+        <div className="error-banner" role="alert">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+          <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
+        </div>
+      )}
+
+      <div className={`columns-scroll${syncing ? " columns-syncing" : ""}`}>
         <Column
           id="master"
           title="Master"
