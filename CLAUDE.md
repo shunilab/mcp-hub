@@ -43,10 +43,12 @@ GUI (React) → useCli.ts → Tauri invoke("run_cli") → lib.rs → node cli.cj
 The Tauri backend (`src-tauri/src/lib.rs`) spawns Node.js with the bundled CLI as a child process for every operation. The frontend parses the JSON output from `mcp-hub status --json`.
 
 ### CLI adapter system
-`packages/cli/src/adapters/` implements the `Adapter` interface (`base.ts`) for each supported client. Built-in adapters cover `claude-desktop`, `claude-code`, `cline`, `roo-code`, `opencode`, `codex`. User-defined adapters are loaded from `~/.mcp-hub/clients.json`.
+`packages/cli/src/adapters/` implements the `Adapter` interface (`base.ts`) for each supported client. Built-in adapters cover `claude-desktop`, `claude-code`, `cline`, `roo-code`, `opencode`, `codex`. User-defined adapters are loaded from `~/.mcp-hub/clients.json` with the schema `Record<id, { configPath: string | { darwin, win32 }, rootKey: string, format: "json"|"toml"|"yaml" }>`.
+
+Note: `opencode` and `codex` have custom read/write logic (opencode nests under `.mcp`, codex uses TOML with `.mcp_servers` key).
 
 ### Hub config (master store)
-The CLI maintains a single source of truth at `~/.mcp-hub/servers.json` (`HubConfig`, version 1). All sync operations read/write against this file plus the target client's config file. Backups are written before mutations; `undo` restores the most recent backup.
+The CLI maintains a single source of truth at `~/.mcp-hub/servers.json` (`HubConfig`, version 1). The top-level key for server entries is `mcpServers` (not `servers`). All sync operations read/write against this file plus the target client's config file. Backups are written before mutations; `undo` restores the most recent backup.
 
 ### GUI views
 - **LibraryView** — multi-column kanban-style view, one column per client. Drag-and-drop between columns calls `sync` + optional `remove`. Hold Cmd/Ctrl for copy-only mode. Cmd+Z → undo, Cmd+R → refresh.
