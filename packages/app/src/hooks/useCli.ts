@@ -14,6 +14,7 @@ export interface McpServer {
 
 export interface ClientStatus {
   name: string;
+  configPath: string;
   servers: Record<string, McpServer>;
   configExists: boolean;
   shared: string[];

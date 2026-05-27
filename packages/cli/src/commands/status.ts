@@ -4,6 +4,7 @@ import { getAllAdapters } from "../adapters/index.js";
 
 export interface ClientStatus {
   name: string;
+  configPath: string;
   servers: Record<string, unknown>;
   configExists: boolean;
   shared: string[];
@@ -22,7 +23,7 @@ export function status(options: { json?: boolean } = {}) {
   for (const adapter of getAllAdapters()) {
     const servers = adapter.read();
     if (!servers) {
-      result.clients.push({ name: adapter.name, servers: {}, configExists: false, shared: [], masterOnly: [...masterKeys], clientOnly: [] });
+      result.clients.push({ name: adapter.name, configPath: adapter.configPath(), servers: {}, configExists: false, shared: [], masterOnly: [...masterKeys], clientOnly: [] });
       if (!options.json) console.log(`  ${chalk.gray(adapter.name)}: ${chalk.yellow("no config file")}`);
       continue;
     }
@@ -32,7 +33,7 @@ export function status(options: { json?: boolean } = {}) {
     const masterOnly = [...masterKeys].filter((k) => !clientKeys.has(k));
     const clientOnly = [...clientKeys].filter((k) => !masterKeys.has(k));
 
-    result.clients.push({ name: adapter.name, servers, configExists: true, shared, masterOnly, clientOnly });
+    result.clients.push({ name: adapter.name, configPath: adapter.configPath(), servers, configExists: true, shared, masterOnly, clientOnly });
 
     if (!options.json) {
       console.log(`\n  ${chalk.bold(adapter.name)}: ${clientKeys.size} servers`);
