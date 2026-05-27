@@ -9,7 +9,7 @@ import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, 
 
 interface DragState { name: string; from: string; }
 interface CtxState { x: number; y: number; items: MenuItem[]; }
-interface ConfirmState { message: string; onConfirm: () => void; }
+interface ConfirmState { message: string; confirmLabel?: string; onConfirm: () => void; }
 interface DropIndicator { column: string; beforeName: string | null; }
 
 // ── ServerCard ────────────────────────────────────────────────────────────────
@@ -389,10 +389,19 @@ export function LibraryView() {
       {
         label: "Sync all → clients",
         icon: <ArrowDownToLine size={12} />,
-        onClick: async () => {
-          await syncFromTo(undefined, undefined);
-          await load();
-        },
+        onClick: () => setConfirm({
+          message: "Master の全サーバーを全クライアントに同期します。各クライアントの既存設定は上書きされます。続けますか？",
+          confirmLabel: "Sync",
+          onConfirm: async () => {
+            setConfirm(null);
+            try {
+              await syncFromTo(undefined, undefined);
+              await load();
+            } catch (e) {
+              setError(String(e));
+            }
+          },
+        }),
       },
     ];
     setCtx({ x: e.clientX, y: e.clientY, items });
@@ -492,7 +501,7 @@ export function LibraryView() {
       </div>
 
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={() => setCtx(null)} />}
-      {confirm && <ConfirmDialog message={confirm.message} onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} />}
+      {confirm && <ConfirmDialog message={confirm.message} confirmLabel={confirm.confirmLabel} onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} />}
     </div>
   );
 }
