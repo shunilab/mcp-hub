@@ -16,8 +16,8 @@ const BUILT_IN_ADAPTERS: Adapter[] = [
     win32: "%APPDATA%\\Claude\\claude_desktop_config.json",
   }),
   createJsonMcpServersAdapter("claude-code", {
-    darwin: "~/.claude/.mcp.json",
-    win32: "%USERPROFILE%\\.claude\\.mcp.json",
+    darwin: "~/.claude.json",
+    win32: "%USERPROFILE%\\.claude.json",
   }),
   createJsonMcpServersAdapter("cline", {
     darwin: "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",

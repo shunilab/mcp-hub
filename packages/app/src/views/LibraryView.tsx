@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { fetchStatus, syncFromTo, removeServer, undoLast, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
+import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload } from "lucide-react";
@@ -10,6 +10,7 @@ import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, 
 interface DragState { name: string; from: string; }
 interface CtxState { x: number; y: number; items: MenuItem[]; }
 interface ConfirmState { message: string; onConfirm: () => void; }
+interface DropIndicator { column: string; beforeName: string | null; }
 
 // ── ServerCard ────────────────────────────────────────────────────────────────
 
@@ -18,28 +19,36 @@ interface ServerCardProps {
   server: McpServer;
   columnName: string;
   isCopyMode: boolean;
+  dropIndicator: DropIndicator | null;
   onDragStart: (name: string, from: string) => void;
+  onDragOver: (e: React.DragEvent, name: string, column: string) => void;
   onContextMenu: (e: React.MouseEvent, name: string, columnName: string) => void;
 }
 
-function ServerCard({ name, server, columnName, isCopyMode, onDragStart, onContextMenu }: ServerCardProps) {
+function ServerCard({ name, server, columnName, isCopyMode, dropIndicator, onDragStart, onDragOver, onContextMenu }: ServerCardProps) {
   const desc = server.command
     ? `${server.command} ${(server.args ?? []).join(" ")}`
     : server.url ?? "";
 
+  const showIndicator = dropIndicator?.column === columnName && dropIndicator?.beforeName === name;
+
   return (
-    <div
-      className={`server-card ${isCopyMode ? "copy-mode" : ""}`}
-      draggable
-      onDragStart={() => onDragStart(name, columnName)}
-      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, name, columnName); }}
-    >
-      <div className="server-card-header">
-        <Server size={14} />
-        <span className="server-name">{name}</span>
+    <>
+      {showIndicator && <div className="drop-indicator" />}
+      <div
+        className={`server-card ${isCopyMode ? "copy-mode" : ""}`}
+        draggable
+        onDragStart={() => onDragStart(name, columnName)}
+        onDragOver={(e) => onDragOver(e, name, columnName)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, name, columnName); }}
+      >
+        <div className="server-card-header">
+          <Server size={14} />
+          <span className="server-name">{name}</span>
+        </div>
+        <div className="server-desc">{desc}</div>
       </div>
-      <div className="server-desc">{desc}</div>
-    </div>
+    </>
   );
 }
 
@@ -51,8 +60,11 @@ interface ColumnProps {
   servers: Record<string, McpServer>;
   isMaster?: boolean;
   isCopyMode: boolean;
+  dropIndicator: DropIndicator | null;
   onDragStart: (name: string, from: string) => void;
+  onDragOver: (e: React.DragEvent, cardName: string, column: string) => void;
   onDrop: (to: string) => void;
+  onDragLeave: () => void;
   onCardContextMenu: (e: React.MouseEvent, name: string, columnName: string) => void;
   onColContextMenu?: (e: React.MouseEvent) => void;
   onColDragStart?: () => void;
@@ -64,7 +76,8 @@ interface ColumnProps {
 
 function Column({
   title, id, servers, isMaster, isCopyMode,
-  onDragStart, onDrop, onCardContextMenu, onColContextMenu,
+  dropIndicator, onDragStart, onDragOver, onDrop, onDragLeave,
+  onCardContextMenu, onColContextMenu,
   onColDragStart, onColDragEnd, onMoveLeft, onMoveRight, isColDragging,
 }: ColumnProps) {
   const [over, setOver] = useState(false);
@@ -73,7 +86,12 @@ function Column({
     <div
       className={`column ${isMaster ? "column-master" : ""} ${over ? "column-over" : ""} ${isColDragging ? "column-dragging" : ""}`}
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
+      onDragLeave={(e) => {
+        if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+          setOver(false);
+          onDragLeave();
+        }
+      }}
       onDrop={() => { setOver(false); onDrop(id); }}
       onContextMenu={onColContextMenu ? (e) => { if ((e.target as HTMLElement).closest(".server-card")) return; e.preventDefault(); onColContextMenu(e); } : undefined}
     >
@@ -109,10 +127,16 @@ function Column({
             server={server}
             columnName={id}
             isCopyMode={isCopyMode}
+            dropIndicator={dropIndicator}
             onDragStart={onDragStart}
+            onDragOver={onDragOver}
             onContextMenu={onCardContextMenu}
           />
         ))}
+        {/* Indicator for dropping at the end of the list */}
+        {dropIndicator?.column === id && dropIndicator?.beforeName === null && (
+          <div className="drop-indicator" />
+        )}
         {Object.keys(servers).length === 0 && (
           <div className="column-empty">Drop servers here</div>
         )}
@@ -133,6 +157,7 @@ export function LibraryView() {
   const [isCopyMode, setIsCopyMode] = useState(false);
   const [ctx, setCtx] = useState<CtxState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
 
   // Track Cmd/Ctrl for copy-vs-move drag
   useEffect(() => {
@@ -189,6 +214,27 @@ export function LibraryView() {
 
   // ── drag & drop ───────────────────────────────────────────────────────────
 
+  function handleCardDragOver(e: React.DragEvent, cardName: string, column: string) {
+    if (!dragging) return;
+    if (dragging.from !== column) return; // inter-column: no indicator
+    e.preventDefault();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const isTopHalf = e.clientY < rect.top + rect.height / 2;
+    if (isTopHalf) {
+      setDropIndicator({ column, beforeName: cardName });
+    } else {
+      // Insert after this card: find next card name
+      if (!data) return;
+      const servers = column === "master"
+        ? data.master
+        : data.clients.find((c) => c.name === column)?.servers ?? {};
+      const keys = Object.keys(servers);
+      const idx = keys.indexOf(cardName);
+      const nextName = idx < keys.length - 1 ? keys[idx + 1] : null;
+      setDropIndicator({ column, beforeName: nextName });
+    }
+  }
+
   async function handleDrop(to: string) {
     if (draggingCol) {
       const fromCol = draggingCol;
@@ -209,13 +255,33 @@ export function LibraryView() {
     if (!dragging) return;
     const { name, from } = dragging;
     const copyMode = isCopyMode;
+    const indicator = dropIndicator;
     setDragging(null);
-    if (from === to) return;
+    setDropIndicator(null);
 
+    // Intra-column reorder
+    if (from === to) {
+      if (!indicator || indicator.column !== to) return;
+      if (!data) return;
+      const servers = to === "master"
+        ? data.master
+        : data.clients.find((c) => c.name === to)?.servers ?? {};
+      const keys = Object.keys(servers).filter((k) => k !== name);
+      const insertIdx = indicator.beforeName ? keys.indexOf(indicator.beforeName) : keys.length;
+      keys.splice(insertIdx, 0, name);
+      try {
+        await reorderServers(to, keys);
+        await load();
+      } catch (e) {
+        setError(String(e));
+      }
+      return;
+    }
+
+    // Inter-column: sync (copy) + optionally remove (move)
     try {
       await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name);
       if (!copyMode) {
-        // move: remove from source
         await removeServer(name, from === "master" ? undefined : from);
       }
       await load();
@@ -367,8 +433,11 @@ export function LibraryView() {
           servers={data.master}
           isMaster
           isCopyMode={isCopyMode}
+          dropIndicator={dropIndicator}
           onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
+          onDragOver={handleCardDragOver}
           onDrop={handleDrop}
+          onDragLeave={() => setDropIndicator(null)}
           onCardContextMenu={showCardCtxMenu}
         />
 
@@ -379,8 +448,11 @@ export function LibraryView() {
             title={client.name}
             servers={client.servers}
             isCopyMode={isCopyMode}
+            dropIndicator={dropIndicator}
             onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
+            onDragOver={handleCardDragOver}
             onDrop={handleDrop}
+            onDragLeave={() => setDropIndicator(null)}
             onCardContextMenu={showCardCtxMenu}
             onColContextMenu={(e) => showColCtxMenu(e, client)}
             onColDragStart={() => { setDragging(null); setDraggingCol(client.name); }}

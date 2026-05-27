@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { sync } from "./commands/sync.js";
 import { add } from "./commands/add.js";
 import { remove } from "./commands/remove.js";
+import { reorder } from "./commands/reorder.js";
 import { list } from "./commands/list.js";
 import { importFrom } from "./commands/import.js";
 import { status } from "./commands/status.js";
@@ -56,6 +57,12 @@ program
   .description("Show sync status across all clients")
   .option("--json", "Output as JSON")
   .action(status);
+
+program
+  .command("reorder <client>")
+  .description("Reorder servers in master or a client")
+  .requiredOption("--order <names>", "Comma-separated server names in desired order")
+  .action(reorder);
 
 program
   .command("undo")

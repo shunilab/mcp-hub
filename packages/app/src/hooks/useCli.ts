@@ -64,3 +64,7 @@ export async function removeServer(name: string, from?: string): Promise<void> {
 export async function undoLast(): Promise<void> {
   await runCli(["undo"]);
 }
+
+export async function reorderServers(client: string, order: string[]): Promise<void> {
+  await runCli(["reorder", client, "--order", order.join(",")]);
+}
