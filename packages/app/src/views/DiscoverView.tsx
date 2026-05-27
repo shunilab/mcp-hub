@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { addServer, McpServer } from "../hooks/useCli";
 import { Plus, ExternalLink, AlertCircle } from "lucide-react";
 
@@ -138,14 +139,13 @@ export function DiscoverView() {
                   <Plus size={14} />
                   {isAdded ? "Added" : npxable ? "Add to Master" : "Remote Only"}
                 </button>
-                <a
-                  href={s.homepage ?? `https://smithery.ai/server/${s.qualifiedName}`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
                   className="icon-btn"
+                  title="Open in browser"
+                  onClick={() => openUrl(s.homepage ?? `https://smithery.ai/server/${s.qualifiedName}`)}
                 >
                   <ExternalLink size={14} />
-                </a>
+                </button>
               </div>
             </div>
           );
