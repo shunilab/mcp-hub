@@ -372,6 +372,32 @@ export function LibraryView() {
     setCtx({ x: e.clientX, y: e.clientY, items });
   }
 
+  function showMasterCtxMenu(e: React.MouseEvent) {
+    if (!data) return;
+    const items: MenuItem[] = [
+      {
+        label: "Open config in editor",
+        icon: <FolderOpen size={12} />,
+        onClick: () => openInEditor(data.masterConfigPath),
+      },
+      {
+        label: "Copy config path",
+        icon: <Copy size={12} />,
+        onClick: () => copyPath(data.masterConfigPath),
+      },
+      "separator",
+      {
+        label: "Sync all → clients",
+        icon: <ArrowDownToLine size={12} />,
+        onClick: async () => {
+          await syncFromTo(undefined, undefined);
+          await load();
+        },
+      },
+    ];
+    setCtx({ x: e.clientX, y: e.clientY, items });
+  }
+
   function showColCtxMenu(e: React.MouseEvent, client: ClientStatus) {
     const items: MenuItem[] = [
       {
@@ -386,7 +412,7 @@ export function LibraryView() {
       },
       "separator",
       {
-        label: "Import all → master",
+        label: "Export all → master",
         icon: <Upload size={12} />,
         onClick: async () => {
           await syncFromTo(client.name, "master");
@@ -439,6 +465,7 @@ export function LibraryView() {
           onDrop={handleDrop}
           onDragLeave={() => setDropIndicator(null)}
           onCardContextMenu={showCardCtxMenu}
+          onColContextMenu={showMasterCtxMenu}
         />
 
         {orderedClients.map((client, idx) => (

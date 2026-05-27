@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { loadHub } from "../hub.js";
+import { loadHub, getHubFile } from "../hub.js";
 import { getAllAdapters } from "../adapters/index.js";
 
 export interface ClientStatus {
@@ -15,8 +15,9 @@ export interface ClientStatus {
 export function status(options: { json?: boolean } = {}) {
   const hub = loadHub();
   const masterKeys = new Set(Object.keys(hub.mcpServers));
-  const result: { master: Record<string, unknown>; clients: ClientStatus[] } = {
+  const result: { master: Record<string, unknown>; masterConfigPath: string; clients: ClientStatus[] } = {
     master: hub.mcpServers,
+    masterConfigPath: getHubFile(),
     clients: [],
   };
 

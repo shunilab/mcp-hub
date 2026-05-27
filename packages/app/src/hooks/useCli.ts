@@ -24,6 +24,7 @@ export interface ClientStatus {
 
 export interface StatusResult {
   master: Record<string, McpServer>;
+  masterConfigPath: string;
   clients: ClientStatus[];
 }
 
