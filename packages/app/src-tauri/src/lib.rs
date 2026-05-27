@@ -26,25 +26,34 @@ fn run_cli(app: tauri::AppHandle, args: Vec<String>) -> Result<String, String> {
 fn install_cli(app: tauri::AppHandle) -> Result<String, String> {
     let cli_resource = bundled_cli_path(&app)
         .ok_or("Bundled CLI not found in app resources")?;
-
     let node = find_node().ok_or("node not found")?;
 
-    // Write a wrapper script so the user can run `mcp-hub` in the terminal
-    let wrapper = format!("#!/bin/sh\nexec '{}' '{}' \"$@\"\n", node, cli_resource.display());
-
     let install_path = install_target();
-
-    // Ensure the parent directory exists
     if let Some(parent) = install_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    std::fs::write(&install_path, wrapper).map_err(|e| {
-        format!("Failed to write to {}: {}", install_path.display(), e)
-    })?;
+    #[cfg(windows)]
+    {
+        let bat = format!(
+            "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+            node,
+            cli_resource.display()
+        );
+        std::fs::write(&install_path, bat)
+            .map_err(|e| format!("Failed to write {}: {}", install_path.display(), e))?;
+    }
 
     #[cfg(unix)]
     {
+        let sh = format!(
+            "#!/bin/sh\nexec '{}' '{}' \"$@\"\n",
+            node,
+            cli_resource.display()
+        );
+        std::fs::write(&install_path, sh)
+            .map_err(|e| format!("Failed to write {}: {}", install_path.display(), e))?;
+
         use std::os::unix::fs::PermissionsExt;
         let mut perms = std::fs::metadata(&install_path)
             .map_err(|e| e.to_string())?
@@ -73,11 +82,28 @@ fn cli_install_status() -> bool {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 fn install_target() -> std::path::PathBuf {
-    // Prefer ~/.local/bin (always writable, no sudo)
-    if let Some(home) = dirs::home_dir() {
-        return home.join(".local/bin/mcp-hub");
+    #[cfg(windows)]
+    {
+        // %APPDATA%\npm\ is already in PATH for most Node.js installs on Windows
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let p = std::path::PathBuf::from(appdata).join("npm").join("mcp-hub.cmd");
+            if p.parent().map(|d| d.exists()).unwrap_or(false) {
+                return p;
+            }
+        }
+        // Fallback: %USERPROFILE%\.local\bin\mcp-hub.cmd
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".local").join("bin").join("mcp-hub.cmd");
+        }
+        std::path::PathBuf::from("mcp-hub.cmd")
     }
-    std::path::PathBuf::from("/usr/local/bin/mcp-hub")
+    #[cfg(unix)]
+    {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(".local").join("bin").join("mcp-hub");
+        }
+        std::path::PathBuf::from("/usr/local/bin/mcp-hub")
+    }
 }
 
 fn bundled_cli_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
@@ -100,17 +126,14 @@ fn find_cli(app: &tauri::AppHandle) -> Option<String> {
         }
     }
 
-    // 3. Dev mode: resolve workspace root from executable path
+    // 3. Dev mode: workspace root relative to executable
     if let Ok(exe) = std::env::current_exe() {
         if let Some(root) = exe
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
+            .parent().and_then(|p| p.parent())
+            .and_then(|p| p.parent()).and_then(|p| p.parent())
+            .and_then(|p| p.parent()).and_then(|p| p.parent())
         {
-            let cli = root.join("packages/cli/dist/index.js");
+            let cli = root.join("packages").join("cli").join("dist").join("index.js");
             if cli.exists() {
                 return Some(cli.to_string_lossy().to_string());
             }
@@ -119,7 +142,7 @@ fn find_cli(app: &tauri::AppHandle) -> Option<String> {
 
     // 4. Home dir fallback
     if let Some(home) = dirs::home_dir() {
-        let cli = home.join(".mcp-hub/cli/index.js");
+        let cli = home.join(".mcp-hub").join("cli").join("index.js");
         if cli.exists() {
             return Some(cli.to_string_lossy().to_string());
         }
@@ -129,43 +152,63 @@ fn find_cli(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn expanded_path() -> String {
+    let sep = if cfg!(windows) { ";" } else { ":" };
     let system_path = std::env::var("PATH").unwrap_or_default();
-    let extras = [
-        "/opt/homebrew/bin",
-        "/opt/homebrew/sbin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
+
+    #[cfg(windows)]
+    let extras = vec![
+        std::env::var("APPDATA").map(|v| format!("{}\\npm", v)).unwrap_or_default(),
+        r"C:\Program Files\nodejs".to_string(),
+        r"C:\Program Files (x86)\nodejs".to_string(),
     ];
-    let extra = extras.join(":");
-    if system_path.is_empty() {
-        extra
-    } else {
-        format!("{extra}:{system_path}")
-    }
+
+    #[cfg(unix)]
+    let extras = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/opt/homebrew/sbin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+    ];
+
+    let extra = extras.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(sep);
+    if system_path.is_empty() { extra } else { format!("{extra}{sep}{system_path}") }
 }
 
 fn find_node() -> Option<String> {
-    let candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
+    #[cfg(windows)]
+    let candidates = vec![
+        r"C:\Program Files\nodejs\node.exe".to_string(),
+        r"C:\Program Files (x86)\nodejs\node.exe".to_string(),
+        std::env::var("APPDATA").map(|v| format!("{}\\nvm\\nodejs\\node.exe", v)).unwrap_or_default(),
     ];
-    for c in candidates {
-        if std::path::Path::new(c).exists() {
-            return Some(c.to_string());
+
+    #[cfg(unix)]
+    let candidates = vec![
+        "/opt/homebrew/bin/node".to_string(),
+        "/usr/local/bin/node".to_string(),
+        "/usr/bin/node".to_string(),
+    ];
+
+    for c in &candidates {
+        if !c.is_empty() && std::path::Path::new(c).exists() {
+            return Some(c.clone());
         }
     }
-    if let Ok(out) = Command::new("sh")
-        .args(["-c", "command -v node"])
-        .env("PATH", expanded_path())
-        .output()
-    {
-        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+    // Shell fallback
+    #[cfg(windows)]
+    let shell_cmd = Command::new("cmd").args(["/C", "where node"]).env("PATH", expanded_path()).output();
+    #[cfg(unix)]
+    let shell_cmd = Command::new("sh").args(["-c", "command -v node"]).env("PATH", expanded_path()).output();
+
+    if let Ok(out) = shell_cmd {
+        let p = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string();
         if !p.is_empty() {
             return Some(p);
         }
     }
+
     None
 }
 
