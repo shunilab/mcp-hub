@@ -20,6 +20,7 @@ program
   .description("Sync MCP servers between master and clients")
   .option("--from <client>", "Source: client name, 'master', or 'all'")
   .option("--to <client>", "Destination: client name or 'master'")
+  .option("--server <name>", "Copy only this specific server")
   .action(sync);
 
 program
@@ -33,7 +34,8 @@ program
 
 program
   .command("remove <name>")
-  .description("Remove a server from master")
+  .description("Remove a server from master or a client")
+  .option("--from <client>", "Remove from this client instead of master")
   .action(remove);
 
 program
@@ -57,8 +59,7 @@ program
 
 program
   .command("undo")
-  .description("Restore the latest backup")
-  .option("--client <client>", "Restore a specific client config (default: master)")
+  .description("Restore the most recently modified file from backup")
   .action(undo);
 
 program.parse();

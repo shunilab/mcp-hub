@@ -33,6 +33,8 @@ export function safeWrite(filePath: string, content: string): string | null {
   if (fs.existsSync(filePath)) {
     backupFile = backupPath(filePath);
     fs.copyFileSync(filePath, backupFile);
+    // sidecar records the original absolute path for global undo
+    fs.writeFileSync(backupFile + ".origin", filePath, "utf-8");
   }
 
   fs.writeFileSync(filePath, content, "utf-8");
@@ -54,6 +56,38 @@ export function getLatestBackup(filePath: string): string | null {
     .sort()
     .reverse();
   return backups.length > 0 ? path.join(BACKUP_DIR, backups[0]) : null;
+}
+
+/** Find the globally most recent backup and return { backupFile, originalFile }. */
+export function getGlobalLatestBackup(): { backupFile: string; originalFile: string } | null {
+  if (!fs.existsSync(BACKUP_DIR)) return null;
+  const entries = fs
+    .readdirSync(BACKUP_DIR)
+    .filter((f) => f.endsWith(".bak"))
+    .map((f) => ({ f, mtime: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  if (entries.length === 0) return null;
+
+  const backupFile = path.join(BACKUP_DIR, entries[0].f);
+  // filename pattern: <original-basename>.<ISO-timestamp>.bak
+  // strip trailing .bak and the timestamp segment (starts with a digit after last '.')
+  const withoutBak = entries[0].f.slice(0, -4); // remove ".bak"
+  const lastDot = withoutBak.lastIndexOf(".");
+  const originalName = lastDot >= 0 ? withoutBak.slice(0, lastDot) : withoutBak;
+
+  // Locate the original file by scanning common parent dirs stored in backup metadata
+  // We embed the full original path inside the backup name as a stat of the backup itself.
+  // Fallback: read the first line of the backup to determine nothing — instead we store
+  // original path in a sidecar entry alongside the backup file.
+  const sidecar = backupFile + ".origin";
+  if (fs.existsSync(sidecar)) {
+    const originalFile = fs.readFileSync(sidecar, "utf-8").trim();
+    return { backupFile, originalFile };
+  }
+
+  // Legacy: no sidecar — can't determine original path, return null
+  void originalName;
+  return null;
 }
 
 export function pruneOldBackups(ttlDays = BACKUP_TTL_DAYS) {

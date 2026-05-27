@@ -165,20 +165,24 @@ export function LibraryView() {
     }
 
     if (!dragging) return;
-    const { from } = dragging;
+    const { name, from } = dragging;
     setDragging(null);
     if (from === to) return;
     try {
-      await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to);
+      await syncFromTo(
+        from === "master" ? undefined : from,
+        to === "master" ? "master" : to,
+        name,
+      );
       await load();
     } catch (e) {
       setError(String(e));
     }
   }
 
-  async function handleRemove(name: string) {
+  async function handleRemove(name: string, from?: string) {
     try {
-      await removeServer(name);
+      await removeServer(name, from);
       await load();
     } catch (e) {
       setError(String(e));
@@ -220,7 +224,7 @@ export function LibraryView() {
           highlight
           onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
           onDrop={handleDrop}
-          onRemove={handleRemove}
+          onRemove={(name) => handleRemove(name)}
         />
 
         {orderedClients.map((client, idx) => (
@@ -231,6 +235,7 @@ export function LibraryView() {
             servers={client.servers}
             onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
             onDrop={handleDrop}
+            onRemove={(name) => handleRemove(name, client.name)}
             onColDragStart={() => { setDragging(null); setDraggingCol(client.name); }}
             onColDragEnd={() => setDraggingCol(null)}
             onMoveLeft={idx > 0 ? () => moveColumn(client.name, -1) : undefined}

@@ -1,25 +1,20 @@
 import fs from "fs";
 import chalk from "chalk";
-import { getHubFile } from "../hub.js";
-import { getLatestBackup } from "../utils/fs.js";
-import { getAdapter } from "../adapters/index.js";
+import { getGlobalLatestBackup } from "../utils/fs.js";
 
-export function undo(options: { client?: string }) {
-  const targetFile = options.client
-    ? getAdapter(options.client)?.configPath()
-    : getHubFile();
-
-  if (!targetFile) {
-    console.error(chalk.red(`Unknown client: ${options.client}`));
-    process.exit(1);
-  }
-
-  const backup = getLatestBackup(targetFile);
-  if (!backup) {
+export function undo() {
+  const result = getGlobalLatestBackup();
+  if (!result) {
     console.log(chalk.yellow("No backup found"));
     return;
   }
 
-  fs.copyFileSync(backup, targetFile);
-  console.log(chalk.green(`✓ Restored from backup: ${backup}`));
+  const { backupFile, originalFile } = result;
+  fs.copyFileSync(backupFile, originalFile);
+  // remove the backup and its sidecar so the next undo goes one step further back
+  fs.unlinkSync(backupFile);
+  const sidecar = backupFile + ".origin";
+  if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar);
+
+  console.log(chalk.green(`✓ Restored: ${originalFile}`));
 }
