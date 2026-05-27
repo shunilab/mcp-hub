@@ -69,3 +69,15 @@ export async function undoLast(): Promise<void> {
 export async function reorderServers(client: string, order: string[]): Promise<void> {
   await runCli(["reorder", client, "--order", order.join(",")]);
 }
+
+export async function installCli(): Promise<string> {
+  return invoke<string>("install_cli");
+}
+
+export async function uninstallCli(): Promise<void> {
+  return invoke<void>("uninstall_cli");
+}
+
+export async function cliInstallStatus(): Promise<boolean> {
+  return invoke<boolean>("cli_install_status");
+}
