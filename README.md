@@ -22,19 +22,37 @@ MCPHub は **マスター設定** (`~/.mcp-hub/servers.json`) を中心に、各
 
 ## インストール
 
-### デスクトップアプリ
+### macOS
 
-[Releases](https://github.com/momexn/mcp-hub/releases) から各 OS のインストーラーをダウンロードしてください。
+#### GUI（デスクトップアプリ）
 
-- **macOS**: `.dmg` (Universal Binary — Apple Silicon / Intel 両対応)
-- **Windows**: `.msi`
-- **Linux**: `.AppImage`
+1. [Releases](https://github.com/momexn/mcp-hub/releases) から `MCPHub_x.x.x_universal.dmg` をダウンロード
+2. DMG をダブルクリックしてマウント → `MCPHub.app` を `/Applications` にドラッグ
+3. 初回起動時に Gatekeeper の警告が出る場合は、`右クリック → 開く` を選択
 
-### CLI のみ
+#### CLI
 
-アプリの **Settings → Install CLI to PATH** を使うか、CLI パッケージをビルドして手動で配置してください。インストール後:
+GUI アプリを起動後、**Settings → Install CLI to PATH** をクリック。その後シェルを再起動して確認:
 
 ```bash
+mcp-hub --help
+```
+
+---
+
+### Windows
+
+#### GUI（デスクトップアプリ）
+
+1. [Releases](https://github.com/momexn/mcp-hub/releases) から `MCPHub_x.x.x_x64-setup.exe` をダウンロード
+2. インストーラーをダブルクリックして実行
+3. SmartScreen の警告が出た場合は「詳細情報 → 実行」を選択
+
+#### CLI
+
+GUI アプリを起動後、**Settings → Install CLI to PATH** をクリック。コマンドプロンプト / PowerShell を再起動して確認:
+
+```cmd
 mcp-hub --help
 ```
 
