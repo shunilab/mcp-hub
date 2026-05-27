@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { runCli, installCli, uninstallCli, cliInstallStatus } from "../hooks/useCli";
-import { Save, Terminal, Check, X } from "lucide-react";
+import { Save, Terminal, Check, X, RotateCcw } from "lucide-react";
 
 interface ClientPath {
   name: string;
+  defaultPath: string;
   path: string;
 }
 
@@ -21,9 +22,10 @@ export function SettingsView() {
       .then((raw) => {
         const data = JSON.parse(raw);
         setPaths(
-          (data.clients as Array<{ name: string }>).map((c) => ({
+          (data.clients as Array<{ name: string; configPath: string }>).map((c) => ({
             name: c.name,
-            path: "",
+            defaultPath: c.configPath,
+            path: c.configPath,
           }))
         );
         setLoading(false);
@@ -117,13 +119,24 @@ export function SettingsView() {
               <input
                 className="settings-input"
                 value={c.path}
-                placeholder="(OS default)"
                 onChange={(e) => {
                   const next = [...paths];
                   next[i] = { ...c, path: e.target.value };
                   setPaths(next);
                 }}
               />
+              <button
+                className="icon-btn"
+                title="Reset to default"
+                disabled={c.path === c.defaultPath}
+                onClick={() => {
+                  const next = [...paths];
+                  next[i] = { ...c, path: c.defaultPath };
+                  setPaths(next);
+                }}
+              >
+                <RotateCcw size={14} />
+              </button>
             </div>
           ))}
         </div>
