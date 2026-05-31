@@ -40,7 +40,7 @@
   },
   "plugins": {
     "shell": {
-      "open": "^https?://"
+      "open": "^(https?://|file://|/|[a-zA-Z]:\\\\\\\\).+"
     }
   }
 }
