@@ -29,7 +29,7 @@ export const codexAdapter: Adapter = {
         {
           command: v.command as string | undefined,
           args: v.args as string[] | undefined,
-          env: v.environment as Record<string, string> | undefined,
+          env: v.env as Record<string, string> | undefined,
           url: v.url as string | undefined,
         },
       ])
@@ -47,7 +47,7 @@ export const codexAdapter: Adapter = {
         const entry: Record<string, unknown> = {};
         if (v.command) entry.command = v.command;
         if (v.args) entry.args = v.args;
-        if (v.env) entry.environment = v.env;
+        if (v.env) entry.env = v.env;
         if (v.url) entry.url = v.url;
         return [k, entry];
       })
