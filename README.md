@@ -1,7 +1,9 @@
 # MCPHub
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![GitHub Release](https://img.shields.io/github/v/release/momexn/mcp-hub)](https://github.com/momexn/mcp-hub/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/shunilab/mcp-hub)](https://github.com/shunilab/mcp-hub/releases)
+
+![MCPHub Screenshot](docs/screenshot.png)
 
 MCP (Model Context Protocol) サーバー設定を複数の AI クライアント間で一元管理するデスクトップアプリ + CLI ツール。
 
@@ -26,7 +28,7 @@ MCPHub は **マスター設定** (`~/.mcp-hub/servers.json`) を中心に、各
 
 #### GUI（デスクトップアプリ）
 
-1. [Releases](https://github.com/momexn/mcp-hub/releases) から `MCPHub_x.x.x_universal.dmg` をダウンロード
+1. [Releases](https://github.com/shunilab/mcp-hub/releases) から `MCPHub_x.x.x_universal.dmg` をダウンロード
 2. DMG をダブルクリックしてマウント → `MCPHub.app` を `/Applications` にドラッグ
 3. 初回起動時に Gatekeeper の警告が出る場合は、`右クリック → 開く` を選択
 
@@ -44,7 +46,7 @@ mcp-hub --help
 
 #### GUI（デスクトップアプリ）
 
-1. [Releases](https://github.com/momexn/mcp-hub/releases) から `MCPHub_x.x.x_x64-setup.exe` をダウンロード
+1. [Releases](https://github.com/shunilab/mcp-hub/releases) から `MCPHub_x.x.x_x64-setup.exe` をダウンロード
 2. インストーラーをダブルクリックして実行
 3. SmartScreen の警告が出た場合は「詳細情報 → 実行」を選択
 
