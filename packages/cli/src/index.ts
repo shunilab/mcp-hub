@@ -9,6 +9,7 @@ import { importFrom } from "./commands/import.js";
 import { status } from "./commands/status.js";
 import { undo } from "./commands/undo.js";
 import { configSetPath } from "./commands/config.js";
+import { clientAdd, clientRemove, clientList } from "./commands/clients.js";
 import { pruneOldBackups } from "./utils/fs.js";
 
 pruneOldBackups();
@@ -78,5 +79,28 @@ configCmd
   .command("set-path <client> <path>")
   .description("Override the config file path for a client")
   .action(configSetPath);
+
+const clientCmd = program
+  .command("client")
+  .description("Manage user-defined clients");
+
+clientCmd
+  .command("add <id>")
+  .description("Add or update a user-defined client")
+  .requiredOption("--config-path <path>", "Config file path")
+  .option("--root-key <key>", "Root key in config file", "mcpServers")
+  .option("--format <fmt>", "File format: json|toml|yaml", "json")
+  .action(clientAdd);
+
+clientCmd
+  .command("remove <id>")
+  .description("Remove a user-defined client")
+  .action(clientRemove);
+
+clientCmd
+  .command("list")
+  .description("List user-defined clients")
+  .option("--json", "Output as JSON")
+  .action(clientList);
 
 (async () => { await program.parseAsync(); })();

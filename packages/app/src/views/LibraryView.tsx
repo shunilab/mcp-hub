@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-shell";
-import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
+import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, listCustomClients, removeCustomClient, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, AlertCircle, X } from "lucide-react";
@@ -153,6 +153,7 @@ function Column({
 
 export function LibraryView() {
   const [data, setData] = useState<StatusResult | null>(null);
+  const [customClientIds, setCustomClientIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,8 +178,9 @@ export function LibraryView() {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchStatus();
+      const [result, custom] = await Promise.all([fetchStatus(), listCustomClients().catch(() => ({}))]);
       setData(result);
+      setCustomClientIds(new Set(Object.keys(custom)));
       setClientOrder((prev) => {
         const names = result.clients.map((c) => c.name);
         const kept = prev.filter((n) => names.includes(n));
@@ -439,6 +441,7 @@ export function LibraryView() {
   }
 
   function showColCtxMenu(e: React.MouseEvent, client: ClientStatus) {
+    const isCustom = customClientIds.has(client.name);
     const items: MenuItem[] = [
       {
         label: "Open config in editor",
@@ -467,6 +470,27 @@ export function LibraryView() {
           await load();
         },
       },
+      ...(isCustom ? [
+        "separator" as MenuItem,
+        {
+          label: "Remove client",
+          icon: <Trash2 size={12} />,
+          danger: true,
+          onClick: () => setConfirm({
+            message: `Remove client "${client.name}" from MCPHub? This only removes it from the custom client list — the config file itself is not changed.`,
+            confirmLabel: "Remove",
+            onConfirm: async () => {
+              setConfirm(null);
+              try {
+                await removeCustomClient(client.name);
+                await load();
+              } catch (err) {
+                setError(String(err));
+              }
+            },
+          }),
+        },
+      ] : []),
     ];
     setCtx({ x: e.clientX, y: e.clientY, items });
   }

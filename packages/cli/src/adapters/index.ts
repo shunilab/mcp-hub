@@ -3,6 +3,7 @@ import os from "os";
 import fs from "fs";
 import { Adapter } from "./base.js";
 import { createJsonMcpServersAdapter } from "./json-mcpservers.js";
+import { createUserClientAdapter } from "./user-client.js";
 import { opencodeAdapter } from "./opencode.js";
 import { codexAdapter } from "./codex.js";
 import { UserClients, UserClientsSchema } from "../types.js";
@@ -53,10 +54,7 @@ function loadUserAdapters(): Adapter[] {
       return [];
     }
 
-    return [createJsonMcpServersAdapter(name, {
-      darwin: rawPath,
-      win32: rawPath,
-    })];
+    return [createUserClientAdapter(name, rawPath, cfg.rootKey, cfg.format)];
   });
 }
 

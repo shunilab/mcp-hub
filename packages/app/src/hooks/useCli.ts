@@ -82,6 +82,29 @@ export async function cliInstallStatus(): Promise<boolean> {
   return invoke<boolean>("cli_install_status");
 }
 
+export interface CustomClientConfig {
+  configPath: string;
+  rootKey: string;
+  format: "json" | "toml" | "yaml";
+}
+
+export async function listCustomClients(): Promise<Record<string, CustomClientConfig>> {
+  const raw = await runCli(["client", "list", "--json"]);
+  return JSON.parse(raw);
+}
+
+export async function addCustomClient(id: string, cfg: CustomClientConfig): Promise<void> {
+  await runCli(["client", "add", id,
+    "--config-path", cfg.configPath,
+    "--root-key", cfg.rootKey,
+    "--format", cfg.format,
+  ]);
+}
+
+export async function removeCustomClient(id: string): Promise<void> {
+  await runCli(["client", "remove", id]);
+}
+
 export async function saveClientPaths(overrides: Record<string, string>): Promise<void> {
   for (const [client, p] of Object.entries(overrides)) {
     await runCli(["config", "set-path", client, p]);

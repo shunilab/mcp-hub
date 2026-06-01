@@ -165,6 +165,9 @@ body, #root { height: 100vh; overflow: hidden; }
   border-radius: 6px; padding: 6px 10px; color: var(--text); font-size: 13px;
 }
 .settings-input:focus { outline: none; border-color: var(--accent); }
+.settings-input.input-warning { border-color: var(--warning, #e8a838); }
+.settings-field-label { font-size: 11px; color: var(--text-muted); }
+.warning { color: var(--warning, #e8a838); font-size: 12px; }
 
 .cli-install-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .cli-status-badge {
