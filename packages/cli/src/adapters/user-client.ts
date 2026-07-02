@@ -94,7 +94,7 @@ export function createUserClientAdapter(
             ? TOML.parse(raw) as Record<string, unknown>
             : JSON.parse(raw);
         } catch {
-          console.error(`Warning: ${p} is corrupted. Overwriting with new content.`);
+          throw new Error(`${p} is corrupted and cannot be safely updated. Fix or remove it, then retry.`);
         }
       }
       existing[rootKey] = servers;

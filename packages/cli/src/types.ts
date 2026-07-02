@@ -6,7 +6,7 @@ export const McpServerSchema = z.object({
   env: z.record(z.string()).optional(),
   url: z.string().optional(),
   headers: z.record(z.string()).optional(),
-});
+}).passthrough();
 
 export const HubConfigSchema = z.object({
   version: z.literal(1),

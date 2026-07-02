@@ -43,7 +43,16 @@ export function safeWrite(filePath: string, content: string): string | null {
     fs.writeFileSync(backupFile + ".origin", filePath, "utf-8");
   }
 
-  fs.writeFileSync(filePath, content, "utf-8");
+  // Write to a temp file in the same directory, then rename — avoids leaving
+  // a half-written file if the process is interrupted mid-write, and avoids
+  // racing a concurrent reader of the target path (e.g. another app polling
+  // its own config file).
+  const tmpFile = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}`
+  );
+  fs.writeFileSync(tmpFile, content, "utf-8");
+  fs.renameSync(tmpFile, filePath);
   return backupFile;
 }
 

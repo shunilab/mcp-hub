@@ -9,16 +9,52 @@ const HUB_FILE = path.join(HUB_DIR, "servers.json");
 
 const EMPTY_CONFIG: HubConfig = { version: 1, mcpServers: {} };
 
+function readRawHub(): unknown | undefined {
+  if (!fs.existsSync(HUB_FILE)) return undefined;
+  return JSON.parse(fs.readFileSync(HUB_FILE, "utf-8"));
+}
+
+/**
+ * Tolerant read for display-only commands (status, list): a corrupted or
+ * schema-mismatched hub file degrades to an empty config rather than
+ * crashing, since these commands never write the result back.
+ */
 export function loadHub(): HubConfig {
-  if (!fs.existsSync(HUB_FILE)) return { ...EMPTY_CONFIG, mcpServers: {} };
   let raw: unknown;
   try {
-    raw = JSON.parse(fs.readFileSync(HUB_FILE, "utf-8"));
+    raw = readRawHub();
   } catch {
-    console.error(`Warning: ${HUB_FILE} is corrupted. Starting with empty config.`);
+    console.error(`Warning: ${HUB_FILE} is corrupted (invalid JSON). Reading as empty config.`);
     return { ...EMPTY_CONFIG, mcpServers: {} };
   }
-  return HubConfigSchema.parse(raw);
+  if (raw === undefined) return { ...EMPTY_CONFIG, mcpServers: {} };
+  try {
+    return HubConfigSchema.parse(raw);
+  } catch {
+    console.error(`Warning: ${HUB_FILE} does not match the expected schema. Reading as empty config.`);
+    return { ...EMPTY_CONFIG, mcpServers: {} };
+  }
+}
+
+/**
+ * Strict read for any command that will mutate and save the hub file. A
+ * corrupted or schema-mismatched hub file throws instead of silently
+ * degrading — saving an "empty" config over it would destroy the user's
+ * data (see the original data-loss bug this replaces).
+ */
+export function loadHubForWrite(): HubConfig {
+  let raw: unknown;
+  try {
+    raw = readRawHub();
+  } catch {
+    throw new Error(`${HUB_FILE} is corrupted (invalid JSON) and cannot be safely updated. Fix or remove it, then retry.`);
+  }
+  if (raw === undefined) return { ...EMPTY_CONFIG, mcpServers: {} };
+  try {
+    return HubConfigSchema.parse(raw);
+  } catch {
+    throw new Error(`${HUB_FILE} does not match the expected schema and cannot be safely updated. Fix or remove it, then retry.`);
+  }
 }
 
 export function saveHub(config: HubConfig): string | null {
@@ -26,13 +62,13 @@ export function saveHub(config: HubConfig): string | null {
 }
 
 export function addServer(name: string, server: McpServer): void {
-  const config = loadHub();
+  const config = loadHubForWrite();
   config.mcpServers[name] = server;
   saveHub(config);
 }
 
 export function removeServer(name: string): boolean {
-  const config = loadHub();
+  const config = loadHubForWrite();
   if (!(name in config.mcpServers)) return false;
   delete config.mcpServers[name];
   saveHub(config);

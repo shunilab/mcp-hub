@@ -1,12 +1,12 @@
 import chalk from "chalk";
-import { loadHub, saveHub } from "../hub.js";
+import { loadHubForWrite, saveHub } from "../hub.js";
 import { getAdapter } from "../adapters/index.js";
 
 export function reorder(client: string, options: { order: string }) {
   const names = options.order.split(",").map((s) => s.trim()).filter(Boolean);
 
   if (client === "master") {
-    const hub = loadHub();
+    const hub = loadHubForWrite();
     const existing = hub.mcpServers;
     const reordered: typeof existing = {};
     for (const name of names) {

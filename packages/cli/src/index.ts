@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import chalk from "chalk";
 import { sync } from "./commands/sync.js";
 import { add } from "./commands/add.js";
 import { remove } from "./commands/remove.js";
@@ -103,4 +104,11 @@ clientCmd
   .option("--json", "Output as JSON")
   .action(clientList);
 
-(async () => { await program.parseAsync(); })();
+(async () => {
+  try {
+    await program.parseAsync();
+  } catch (err) {
+    console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+    process.exit(1);
+  }
+})();

@@ -20,7 +20,13 @@ export const codexAdapter: Adapter = {
   read(): Record<string, McpServer> | null {
     const p = this.configPath();
     if (!fs.existsSync(p)) return null;
-    const raw = TOML.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+    let raw: Record<string, unknown>;
+    try {
+      raw = TOML.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+    } catch {
+      console.error(`Warning: ${p} is corrupted. Skipping read.`);
+      return null;
+    }
     const mcp_servers = raw.mcp_servers as Record<string, Record<string, unknown>> | undefined;
     if (!mcp_servers) return {};
     return Object.fromEntries(
@@ -40,7 +46,11 @@ export const codexAdapter: Adapter = {
     const p = this.configPath();
     let existing: Record<string, unknown> = {};
     if (fs.existsSync(p)) {
-      existing = TOML.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+      try {
+        existing = TOML.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+      } catch {
+        throw new Error(`${p} is corrupted and cannot be safely updated. Fix or remove it, then retry.`);
+      }
     }
     existing.mcp_servers = Object.fromEntries(
       Object.entries(servers).map(([k, v]) => {

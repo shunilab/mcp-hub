@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { loadHub, saveHub } from "../hub.js";
+import { loadHub, loadHubForWrite, saveHub } from "../hub.js";
 import { getAllAdapters, getAdapter } from "../adapters/index.js";
 
 export async function sync(options: { from?: string; to?: string; server?: string }) {
@@ -26,7 +26,7 @@ export async function sync(options: { from?: string; to?: string; server?: strin
     }
 
     if (!to || to === "master") {
-      const hub = loadHub();
+      const hub = loadHubForWrite();
       hub.mcpServers = { ...hub.mcpServers, ...srcServers };
       saveHub(hub);
       console.log(chalk.green(`✓ ${from} → master: ${Object.keys(srcServers).length} server(s) merged`));
@@ -45,7 +45,7 @@ export async function sync(options: { from?: string; to?: string; server?: strin
 
   if (from === "all") {
     // all clients → master
-    const hub = loadHub();
+    const hub = loadHubForWrite();
     let total = 0;
     for (const adapter of getAllAdapters()) {
       const servers = adapter.read();

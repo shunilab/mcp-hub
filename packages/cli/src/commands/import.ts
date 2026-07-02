@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { loadHub, saveHub } from "../hub.js";
+import { loadHubForWrite, saveHub } from "../hub.js";
 import { getAdapter } from "../adapters/index.js";
 
 export function importFrom(options: { from: string }) {
@@ -15,7 +15,7 @@ export function importFrom(options: { from: string }) {
     return;
   }
 
-  const hub = loadHub();
+  const hub = loadHubForWrite();
   const before = Object.keys(hub.mcpServers).length;
   hub.mcpServers = { ...hub.mcpServers, ...servers };
   const added = Object.keys(hub.mcpServers).length - before;
