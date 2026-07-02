@@ -37,7 +37,7 @@ export function createJsonMcpServersAdapter(
         try {
           existing = JSON.parse(fs.readFileSync(p, "utf-8"));
         } catch {
-          console.error(`Warning: ${p} is corrupted. Overwriting with new content.`);
+          throw new Error(`${p} is corrupted and cannot be safely updated. Fix or remove it, then retry.`);
         }
       }
       existing.mcpServers = servers;
