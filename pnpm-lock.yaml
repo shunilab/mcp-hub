@@ -19,6 +19,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.6)
+      '@mcp-hub/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.0

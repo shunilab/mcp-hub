@@ -34,6 +34,7 @@ program
   .option("--args <args>", "Arguments (space-separated, quote the whole string)")
   .option("--url <url>", "URL for remote servers")
   .option("--env <pairs>", "Env vars as KEY=VAL,KEY2=VAL2")
+  .option("--json <spec>", "Full server spec as a JSON string (overrides other options)")
   .action(add);
 
 program

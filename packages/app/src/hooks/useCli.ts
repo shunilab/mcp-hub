@@ -1,31 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { McpServer, ClientStatus, StatusResult } from "@mcp-hub/cli";
+
+export type { McpServer, ClientStatus, StatusResult };
 
 export async function runCli(args: string[]): Promise<string> {
   return invoke<string>("run_cli", { args });
-}
-
-export interface McpServer {
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
-  url?: string;
-  headers?: Record<string, string>;
-}
-
-export interface ClientStatus {
-  name: string;
-  configPath: string;
-  servers: Record<string, McpServer>;
-  configExists: boolean;
-  shared: string[];
-  masterOnly: string[];
-  clientOnly: string[];
-}
-
-export interface StatusResult {
-  master: Record<string, McpServer>;
-  masterConfigPath: string;
-  clients: ClientStatus[];
 }
 
 export async function fetchStatus(): Promise<StatusResult> {
@@ -46,14 +25,7 @@ export async function importFrom(client: string): Promise<void> {
 }
 
 export async function addServer(name: string, server: McpServer): Promise<void> {
-  const args = ["add", name];
-  if (server.command) args.push("--command", server.command);
-  if (server.args?.length) args.push("--args", server.args.join(" "));
-  if (server.url) args.push("--url", server.url);
-  if (server.env && Object.keys(server.env).length) {
-    args.push("--env", Object.entries(server.env).map(([k, v]) => `${k}=${v}`).join(","));
-  }
-  await runCli(args);
+  await runCli(["add", name, "--json", JSON.stringify(server)]);
 }
 
 export async function removeServer(name: string, from?: string): Promise<void> {
