@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { addServer } from "../hub.js";
 import { McpServer, McpServerSchema } from "../types.js";
 
-export function add(name: string, options: { command?: string; args?: string; url?: string; env?: string; json?: string }) {
+export function add(name: string, options: { command?: string; args?: string; url?: string; env?: string; json?: string; force?: boolean }) {
   let server: McpServer;
 
   if (options.json) {
@@ -48,6 +48,12 @@ export function add(name: string, options: { command?: string; args?: string; ur
     }
   }
 
-  addServer(name, server);
+  try {
+    addServer(name, server, { force: options.force });
+  } catch (e) {
+    console.error(chalk.red((e as Error).message));
+    process.exit(1);
+    return;
+  }
   console.log(chalk.green(`✓ Added "${name}" to master`));
 }

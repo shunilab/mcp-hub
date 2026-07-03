@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { addServer } from "../hooks/useCli";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Plus, ExternalLink, AlertCircle, Minus } from "lucide-react";
 
 // ── types ────────────────────────────────────────────────────────────────────
@@ -9,9 +10,14 @@ interface DiscoverServer {
   id: string;
   displayName: string;
   packageName: string;
+  qualifiedName?: string;
   description: string;
   source: "official" | "smithery";
-  runtime: "npx" | "uvx" | "remote";
+  // "remote": hosted MCP server, addable via { url }.
+  // "unsupported": Smithery-only local server shipped as an .mcpb bundle —
+  // there's no npm/pypi package to invoke and `smithery mcp add` is interactive-only,
+  // so it can't be added automatically (see PR discussion for H-6).
+  runtime: "npx" | "uvx" | "remote" | "unsupported";
   homepage?: string;
 }
 
@@ -24,11 +30,40 @@ const GH_CONTENTS = "https://api.github.com/repos/modelcontextprotocol/servers/c
 const GH_RAW = "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src";
 const GH_TREE = "https://github.com/modelcontextprotocol/servers/tree/main/src";
 const SMITHERY_URL = "https://registry.smithery.ai/servers?q=&page=1&pageSize=100";
+const CACHE_KEY = "mcp-hub:discover-cache:v2";
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// ── cache ─────────────────────────────────────────────────────────────────────
+
+function readCache(): DiscoverServer[] | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { ts: number; servers: DiscoverServer[] };
+    if (Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+    return parsed.servers;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(servers: DiscoverServer[]) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), servers }));
+  } catch {
+    // localStorage unavailable/full — caching is a best-effort optimization
+  }
+}
 
 // ── fetchers ──────────────────────────────────────────────────────────────────
 
+class RateLimitError extends Error {}
+
 async function fetchOfficial(): Promise<DiscoverServer[]> {
-  const items: { name: string; type: string }[] = await fetch(GH_CONTENTS).then((r) => r.json());
+  const res = await fetch(GH_CONTENTS);
+  if (res.status === 403 || res.status === 429) throw new RateLimitError("GitHub API rate limit exceeded");
+  if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+  const items: { name: string; type: string }[] = await res.json();
   const dirs = items.filter((i) => i.type === "dir");
 
   const results = await Promise.allSettled(
@@ -71,7 +106,10 @@ async function fetchOfficial(): Promise<DiscoverServer[]> {
 }
 
 async function fetchSmithery(): Promise<DiscoverServer[]> {
-  const data = await fetch(SMITHERY_URL).then((r) => r.json());
+  const res = await fetch(SMITHERY_URL);
+  if (res.status === 403 || res.status === 429) throw new RateLimitError("Smithery API rate limit exceeded");
+  if (!res.ok) throw new Error(`Smithery API error: ${res.status}`);
+  const data = await res.json();
   const raw: {
     id: string;
     qualifiedName: string;
@@ -88,12 +126,29 @@ async function fetchSmithery(): Promise<DiscoverServer[]> {
       id: `smithery:${s.id}`,
       displayName: s.displayName,
       packageName: pkgName,
+      qualifiedName: s.qualifiedName,
       description: s.description ?? "",
       source: "smithery" as const,
-      runtime: s.remote ? "remote" : "npx",
+      runtime: s.remote ? ("remote" as const) : ("unsupported" as const),
       homepage: s.homepage ?? `https://smithery.ai/server/${s.qualifiedName}`,
     };
   });
+}
+
+// The list endpoint doesn't include the actual connection URL (it's a
+// per-server domain like https://exa.run.tools, not a server.smithery.ai
+// path) — fetch the detail endpoint lazily, only when the user adds a
+// remote server.
+async function fetchSmitheryDeploymentUrl(qualifiedName: string): Promise<string> {
+  const res = await fetch(`https://registry.smithery.ai/servers/${encodeURIComponent(qualifiedName)}`);
+  if (res.status === 403 || res.status === 429) throw new RateLimitError("Smithery API rate limit exceeded");
+  if (!res.ok) throw new Error(`Smithery API error: ${res.status}`);
+  const data = await res.json();
+  const url = data.deploymentUrl ?? data.connections?.[0]?.deploymentUrl;
+  if (typeof url !== "string" || !url) {
+    throw new Error(`"${qualifiedName}" の接続 URL を取得できませんでした`);
+  }
+  return url;
 }
 
 // ── component ──────────────────────────────────────────────────────────────────
@@ -105,11 +160,12 @@ export function DiscoverView() {
 
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
-  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("local");
+  const [runtimeFilter, setRuntimeFilter] = useState<RuntimeFilter>("all");
 
   const [fetchWarning, setFetchWarning] = useState<string | null>(null);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const [confirm, setConfirm] = useState<{ message: string; confirmLabel?: string; onConfirm: () => void } | null>(null);
 
   // Manual add form
   const [showForm, setShowForm] = useState(false);
@@ -120,7 +176,20 @@ export function DiscoverView() {
   const [formErrors, setFormErrors] = useState<{ name?: string; command?: string; submit?: string }>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  async function loadServers() {
+  function rateLimitMessage(source: string) {
+    return `${source} の API レート制限に達しました。しばらくしてから再試行してください。`;
+  }
+
+  async function loadServers(options: { force?: boolean } = {}) {
+    if (!options.force) {
+      const cached = readCache();
+      if (cached) {
+        setServers(cached);
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     setFetchWarning(null);
@@ -130,15 +199,24 @@ export function DiscoverView() {
 
     const seen = new Set(official.map((s) => s.packageName));
     const deduped = smithery.filter((s) => !seen.has(s.packageName));
-    setServers([...official, ...deduped]);
+    const merged = [...official, ...deduped];
+    setServers(merged);
     setLoading(false);
 
     if (officialRes.status === "rejected" && smitheryRes.status === "rejected") {
       setError("Failed to load servers");
     } else if (officialRes.status === "rejected") {
-      setFetchWarning("Official servers could not be loaded");
+      setFetchWarning(
+        officialRes.reason instanceof RateLimitError ? rateLimitMessage("GitHub") : "Official servers could not be loaded"
+      );
     } else if (smitheryRes.status === "rejected") {
-      setFetchWarning("Smithery servers could not be loaded");
+      setFetchWarning(
+        smitheryRes.reason instanceof RateLimitError ? rateLimitMessage("Smithery") : "Smithery servers could not be loaded"
+      );
+    }
+
+    if (officialRes.status === "fulfilled" || smitheryRes.status === "fulfilled") {
+      writeCache(merged);
     }
   }
 
@@ -160,18 +238,30 @@ export function DiscoverView() {
     return matchesQuery && matchesSource && matchesRuntime;
   });
 
-  async function handleAdd(s: DiscoverServer) {
+  async function handleAdd(s: DiscoverServer, force = false) {
     setAddingId(s.id);
     try {
       const name = s.displayName.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase();
-      if (s.runtime === "npx") {
-        await addServer(name, { command: "npx", args: ["-y", s.packageName] });
+      if (s.runtime === "remote") {
+        const url = await fetchSmitheryDeploymentUrl(s.qualifiedName!);
+        await addServer(name, { url }, force);
+      } else if (s.runtime === "npx") {
+        await addServer(name, { command: "npx", args: ["-y", s.packageName] }, force);
       } else if (s.runtime === "uvx") {
-        await addServer(name, { command: "uvx", args: [s.packageName] });
+        await addServer(name, { command: "uvx", args: [s.packageName] }, force);
       }
       setAdded((prev) => new Set([...prev, s.id]));
     } catch (e) {
-      setError(`追加に失敗しました: ${String(e)}`);
+      const msg = String(e);
+      if (!force && msg.includes("already exists in master")) {
+        setConfirm({
+          message: `"${s.displayName}" は既に Master に存在します。上書きしますか?`,
+          confirmLabel: "上書き",
+          onConfirm: () => { setConfirm(null); handleAdd(s, true); },
+        });
+      } else {
+        setError(`追加に失敗しました: ${msg}`);
+      }
     } finally {
       setAddingId(null);
     }
@@ -187,7 +277,7 @@ export function DiscoverView() {
     setFormSubmitting(false);
   }
 
-  async function handleManualAdd() {
+  async function handleManualAdd(force = false) {
     const errs: typeof formErrors = {};
     const nameVal = formName.trim();
     const commandVal = formCommand.trim();
@@ -204,10 +294,19 @@ export function DiscoverView() {
         if (k && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) acc[k] = value;
         return acc;
       }, {});
-      await addServer(nameVal, { command: commandVal, args, env: Object.keys(env).length ? env : undefined });
+      await addServer(nameVal, { command: commandVal, args, env: Object.keys(env).length ? env : undefined }, force);
       closeForm();
     } catch (e) {
-      setFormErrors({ submit: String(e) });
+      const msg = String(e);
+      if (!force && msg.includes("already exists in master")) {
+        setConfirm({
+          message: `"${nameVal}" は既に Master に存在します。上書きしますか?`,
+          confirmLabel: "上書き",
+          onConfirm: () => { setConfirm(null); handleManualAdd(true); },
+        });
+      } else {
+        setFormErrors({ submit: msg });
+      }
     } finally {
       setFormSubmitting(false);
     }
@@ -352,7 +451,7 @@ export function DiscoverView() {
             {formErrors.submit && <p className="field-error submit-error">{formErrors.submit}</p>}
             <div className="modal-actions">
               <button className="btn secondary" autoFocus onClick={closeForm}>Cancel</button>
-              <button className="btn primary" disabled={formSubmitting} onClick={handleManualAdd}>
+              <button className="btn primary" disabled={formSubmitting} onClick={() => handleManualAdd()}>
                 {formSubmitting ? "Adding…" : "Add to Master"}
               </button>
             </div>
@@ -365,7 +464,7 @@ export function DiscoverView() {
         <div className="error-banner" role="alert">
           <AlertCircle size={16} />
           {error}
-          <button className="btn secondary small" onClick={loadServers}>Retry</button>
+          <button className="btn secondary small" onClick={() => loadServers({ force: true })}>Retry</button>
           <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}>
             <span style={{ fontSize: 14, lineHeight: 1 }}>✕</span>
           </button>
@@ -385,7 +484,7 @@ export function DiscoverView() {
         {filtered.map((s) => {
           const isAdded = added.has(s.id);
           const busy = addingId === s.id;
-          const canAdd = s.runtime !== "remote";
+          const canAdd = s.runtime !== "unsupported";
           return (
             <div key={s.id} className="registry-card">
               <div className="registry-card-header">
@@ -398,23 +497,23 @@ export function DiscoverView() {
                     {s.source === "official" ? "Official" : "Smithery"}
                   </span>
                   <span
-                    className={`badge ${s.runtime === "npx" ? "local" : s.runtime === "uvx" ? "python" : "remote"}`}
+                    className={`badge ${s.runtime === "npx" ? "local" : s.runtime === "uvx" ? "python" : s.runtime === "remote" ? "remote" : "manual"}`}
                   >
                     {s.runtime}
                   </span>
                 </div>
               </div>
               <p className="registry-desc">{s.description || "MCP server"}</p>
-              <div className="registry-publisher">{s.packageName}</div>
+              <div className="registry-publisher">{s.qualifiedName ?? s.packageName}</div>
               <div className="registry-actions">
                 <button
                   className={`btn ${isAdded ? "secondary" : "primary"}`}
                   disabled={!canAdd || busy || isAdded}
                   onClick={() => handleAdd(s)}
-                  title={!canAdd ? "Remote server — cannot be installed locally" : undefined}
+                  title={!canAdd ? "Smithery のローカル配布サーバー(.mcpb 形式)は自動追加に対応していません。手動でコマンドを確認して Manual Add してください。" : undefined}
                 >
                   <Plus size={14} />
-                  {busy ? "Adding…" : isAdded ? "Added" : canAdd ? "Add to Master" : "Remote Only"}
+                  {busy ? "Adding…" : isAdded ? "Added" : canAdd ? "Add to Master" : "Manual Setup"}
                 </button>
                 {s.homepage && /^https?:\/\//.test(s.homepage) && (
                   <button className="icon-btn" aria-label={`${s.displayName} のホームページを開く`} title="Open homepage" onClick={() => openUrl(s.homepage!)}>
@@ -426,6 +525,15 @@ export function DiscoverView() {
           );
         })}
       </div>
+
+      {confirm && (
+        <ConfirmDialog
+          message={confirm.message}
+          confirmLabel={confirm.confirmLabel}
+          onConfirm={confirm.onConfirm}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
     </div>
   );
 }

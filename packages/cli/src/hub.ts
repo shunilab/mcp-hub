@@ -61,8 +61,11 @@ export function saveHub(config: HubConfig): string | null {
   return safeWrite(HUB_FILE, JSON.stringify(config, null, 2));
 }
 
-export function addServer(name: string, server: McpServer): void {
+export function addServer(name: string, server: McpServer, options: { force?: boolean } = {}): void {
   const config = loadHubForWrite();
+  if (!options.force && name in config.mcpServers) {
+    throw new Error(`Server "${name}" already exists in master. Use --force to overwrite.`);
+  }
   config.mcpServers[name] = server;
   saveHub(config);
 }
