@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-shell";
 import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, listCustomClients, removeCustomClient, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, AlertCircle, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, AlertCircle, CheckCircle2, X } from "lucide-react";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -157,6 +157,7 @@ export function LibraryView() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const [clientOrder, setClientOrder] = useState<string[]>([]);
@@ -195,6 +196,26 @@ export function LibraryView() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-dismiss the success notice after a few seconds.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Runs a CLI-backed action with unified syncing/error state and a post-load refresh.
+  const runAction = useCallback(async (fn: () => Promise<void>) => {
+    setSyncing(true);
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [load]);
 
   // ── column order ──────────────────────────────────────────────────────────
 
@@ -270,34 +291,17 @@ export function LibraryView() {
       const insertIdx = indicator.beforeName ? keys.indexOf(indicator.beforeName) : keys.length;
       keys.splice(insertIdx, 0, name);
       syncingRef.current = true;
-      setSyncing(true);
-      try {
-        await reorderServers(to, keys);
-        await load();
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        syncingRef.current = false;
-        setSyncing(false);
-      }
+      await runAction(async () => { await reorderServers(to, keys); });
+      syncingRef.current = false;
       return;
     }
 
-    // Inter-column: sync (copy) + optionally remove (move)
+    // Inter-column: copy, or move (copy + remove from source in one CLI call)
     syncingRef.current = true;
-    setSyncing(true);
-    try {
-      await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name);
-      if (!copyMode) {
-        await removeServer(name, from === "master" ? undefined : from);
-      }
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      syncingRef.current = false;
-      setSyncing(false);
-    }
+    await runAction(async () => {
+      await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name, !copyMode);
+    });
+    syncingRef.current = false;
   }
 
   // ── delete with confirm ───────────────────────────────────────────────────
@@ -306,14 +310,9 @@ export function LibraryView() {
     const location = from ?? "master";
     setConfirm({
       message: `Delete "${name}" from ${location}?`,
-      onConfirm: async () => {
+      onConfirm: () => {
         setConfirm(null);
-        try {
-          await removeServer(name, from);
-          await load();
-        } catch (e) {
-          setError(String(e));
-        }
+        runAction(async () => { await removeServer(name, from); });
       },
     });
   }
@@ -321,17 +320,22 @@ export function LibraryView() {
   // ── undo ─────────────────────────────────────────────────────────────────
 
   const handleUndo = useCallback(async () => {
-    try {
-      await undoLast();
-      await load();
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [load]);
+    await runAction(async () => {
+      const result = await undoLast();
+      setNotice(
+        result.restored.length === 0
+          ? "復元するバックアップがありません"
+          : `復元しました: ${result.restored.join(", ")}`
+      );
+    });
+  }, [runAction]);
 
-  // Keyboard shortcuts: Cmd+Z = undo, Cmd+R = refresh
+  // Keyboard shortcuts: Cmd+Z = undo, Cmd+R = refresh. Ignored while typing in
+  // a field or while a modal dialog is open, so they don't fire underneath it.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"], [role="dialog"]')) return;
       if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); handleUndo(); }
       if ((e.metaKey || e.ctrlKey) && e.key === "r") { e.preventDefault(); load(); }
     };
@@ -345,14 +349,9 @@ export function LibraryView() {
     setConfirm({
       message: "Master の全サーバーを全クライアントに同期します。各クライアントの既存設定は上書きされます。続けますか？",
       confirmLabel: "Sync",
-      onConfirm: async () => {
+      onConfirm: () => {
         setConfirm(null);
-        try {
-          await syncFromTo(undefined, undefined);
-          await load();
-        } catch (e) {
-          setError(String(e));
-        }
+        runAction(async () => { await syncFromTo(undefined, undefined); });
       },
     });
   }
@@ -379,20 +378,16 @@ export function LibraryView() {
         .map((c) => ({
           label: `  → ${c.name}`,
           icon: <ArrowRight size={12} />,
-          onClick: async () => {
-            await syncFromTo(columnId === "master" ? undefined : columnId, c.name, serverName);
-            if (!isCopyMode) await removeServer(serverName, columnId === "master" ? undefined : columnId);
-            await load();
-          },
+          onClick: () => runAction(async () => {
+            await syncFromTo(columnId === "master" ? undefined : columnId, c.name, serverName, !isCopyMode);
+          }),
         })),
       ...(columnId !== "master" ? [{
         label: "  → master",
         icon: <ArrowDownToLine size={12} />,
-        onClick: async () => {
-          await syncFromTo(columnId, "master", serverName);
-          if (!isCopyMode) await removeServer(serverName, columnId);
-          await load();
-        },
+        onClick: () => runAction(async () => {
+          await syncFromTo(columnId, "master", serverName, !isCopyMode);
+        }),
       }] : otherClients.length === 0 ? [] : []),
       "separator" as MenuItem,
       {
@@ -422,19 +417,7 @@ export function LibraryView() {
       {
         label: "Sync all → clients",
         icon: <ArrowDownToLine size={12} />,
-        onClick: () => setConfirm({
-          message: "Master の全サーバーを全クライアントに同期します。各クライアントの既存設定は上書きされます。続けますか？",
-          confirmLabel: "Sync",
-          onConfirm: async () => {
-            setConfirm(null);
-            try {
-              await syncFromTo(undefined, undefined);
-              await load();
-            } catch (e) {
-              setError(String(e));
-            }
-          },
-        }),
+        onClick: handleSyncAll,
       },
     ];
     setCtx({ x: e.clientX, y: e.clientY, items });
@@ -457,18 +440,12 @@ export function LibraryView() {
       {
         label: "Export all → master",
         icon: <Upload size={12} />,
-        onClick: async () => {
-          await syncFromTo(client.name, "master");
-          await load();
-        },
+        onClick: () => runAction(async () => { await syncFromTo(client.name, "master"); }),
       },
       {
         label: "Sync all from master",
         icon: <ArrowDownToLine size={12} />,
-        onClick: async () => {
-          await syncFromTo(undefined, client.name);
-          await load();
-        },
+        onClick: () => runAction(async () => { await syncFromTo(undefined, client.name); }),
       },
       ...(isCustom ? [
         "separator" as MenuItem,
@@ -479,14 +456,9 @@ export function LibraryView() {
           onClick: () => setConfirm({
             message: `Remove client "${client.name}" from MCPHub? This only removes it from the custom client list — the config file itself is not changed.`,
             confirmLabel: "Remove",
-            onConfirm: async () => {
+            onConfirm: () => {
               setConfirm(null);
-              try {
-                await removeCustomClient(client.name);
-                await load();
-              } catch (err) {
-                setError(String(err));
-              }
+              runAction(async () => { await removeCustomClient(client.name); });
             },
           }),
         },
@@ -542,6 +514,14 @@ export function LibraryView() {
           <AlertCircle size={16} />
           <span>{error}</span>
           <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="success-banner" role="status">
+          <CheckCircle2 size={16} />
+          <span>{notice}</span>
+          <button className="icon-btn" aria-label="閉じる" onClick={() => setNotice(null)}><X size={14} /></button>
         </div>
       )}
 

@@ -278,8 +278,8 @@ body, #root { height: 100vh; overflow: hidden; }
 }
 .form-list-input:focus { outline: none; border-color: var(--accent); }
 
-/* error / warning banners */
-.error-banner, .warn-banner {
+/* error / warning / success banners */
+.error-banner, .warn-banner, .success-banner {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px; margin: 8px 16px; border-radius: 8px;
   font-size: 13px;
@@ -290,7 +290,10 @@ body, #root { height: 100vh; overflow: hidden; }
 .warn-banner {
   background: var(--warn-bg); color: var(--warn); border: 1px solid rgba(255,180,50,0.3);
 }
-.error-banner .icon-btn, .warn-banner .icon-btn { margin-left: auto; }
+.success-banner {
+  background: rgba(72,178,120,0.12); color: #3fa76a; border: 1px solid rgba(72,178,120,0.3);
+}
+.error-banner .icon-btn, .warn-banner .icon-btn, .success-banner .icon-btn { margin-left: auto; }
 
 /* inline field validation errors */
 .field-error { font-size: 12px; color: var(--danger); margin-top: 4px; }

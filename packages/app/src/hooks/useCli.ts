@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { McpServer, ClientStatus, StatusResult } from "@mcp-hub/cli";
+import type { McpServer, ClientStatus, StatusResult, UndoResult } from "@mcp-hub/cli";
 
-export type { McpServer, ClientStatus, StatusResult };
+export type { McpServer, ClientStatus, StatusResult, UndoResult };
 
 export async function runCli(args: string[]): Promise<string> {
   return invoke<string>("run_cli", { args });
@@ -12,11 +12,12 @@ export async function fetchStatus(): Promise<StatusResult> {
   return JSON.parse(raw);
 }
 
-export async function syncFromTo(from?: string, to?: string, server?: string): Promise<void> {
+export async function syncFromTo(from?: string, to?: string, server?: string, move?: boolean): Promise<void> {
   const args = ["sync"];
   if (from) args.push("--from", from);
   if (to) args.push("--to", to);
   if (server) args.push("--server", server);
+  if (move) args.push("--move");
   await runCli(args);
 }
 
@@ -34,8 +35,9 @@ export async function removeServer(name: string, from?: string): Promise<void> {
   await runCli(args);
 }
 
-export async function undoLast(): Promise<void> {
-  await runCli(["undo"]);
+export async function undoLast(): Promise<UndoResult> {
+  const raw = await runCli(["undo", "--json"]);
+  return JSON.parse(raw);
 }
 
 export async function reorderServers(client: string, order: string[]): Promise<void> {

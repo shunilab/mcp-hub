@@ -3,8 +3,8 @@ import chalk from "chalk";
 import { loadHub, loadHubForWrite, saveHub } from "../hub.js";
 import { getAllAdapters, getAdapter } from "../adapters/index.js";
 
-export async function sync(options: { from?: string; to?: string; server?: string; create?: boolean }) {
-  const { from, to, server: serverName, create } = options;
+export async function sync(options: { from?: string; to?: string; server?: string; create?: boolean; move?: boolean }) {
+  const { from, to, server: serverName, create, move } = options;
 
   if (from && from !== "master" && from !== "all") {
     // client → master or client → client
@@ -41,11 +41,19 @@ export async function sync(options: { from?: string; to?: string; server?: strin
       dstAdapter.write(dstAdapter.merge(existing, srcServers));
       console.log(chalk.green(`✓ ${from} → ${to}: ${Object.keys(srcServers).length} server(s) merged`));
     }
+
+    if (move) {
+      const remaining = { ...(srcAdapter.read() ?? {}) };
+      for (const key of Object.keys(srcServers)) delete remaining[key];
+      srcAdapter.write(remaining);
+      console.log(chalk.gray(`  (moved: removed from ${from})`));
+    }
     return;
   }
 
   if (from === "all") {
     // all clients → master
+    if (move) console.error(chalk.yellow("Warning: --move has no effect with --from all; ignoring."));
     const hub = loadHubForWrite();
     let total = 0;
     for (const adapter of getAllAdapters()) {
@@ -78,6 +86,10 @@ export async function sync(options: { from?: string; to?: string; server?: strin
     process.exit(1);
   }
 
+  if (move && !to) {
+    console.error(chalk.yellow("Warning: --move requires an explicit --to; ignoring."));
+  }
+
   for (const adapter of targets) {
     if (!adapter) continue;
     if (!to && !create && !fs.existsSync(adapter.configPath())) {
@@ -87,5 +99,12 @@ export async function sync(options: { from?: string; to?: string; server?: strin
     const existing = adapter.read() ?? {};
     adapter.write(adapter.merge(existing, masterServers));
     console.log(chalk.green(`✓ master → ${adapter.name}`));
+  }
+
+  if (move && to) {
+    const hubForWrite = loadHubForWrite();
+    for (const key of Object.keys(masterServers)) delete hubForWrite.mcpServers[key];
+    saveHub(hubForWrite);
+    console.log(chalk.gray("  (moved: removed from master)"));
   }
 }

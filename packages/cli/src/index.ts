@@ -26,6 +26,7 @@ program
   .option("--to <client>", "Destination: client name or 'master'")
   .option("--server <name>", "Copy only this specific server")
   .option("--create", "Also create config files for clients that don't have one yet (bulk sync only)")
+  .option("--move", "Remove the server from the source after a successful copy (requires an explicit source and destination)")
   .action(sync);
 
 program
@@ -71,7 +72,8 @@ program
 
 program
   .command("undo")
-  .description("Restore the most recently modified file from backup")
+  .description("Restore the most recently modified file(s) from backup")
+  .option("--json", "Output as JSON")
   .action(undo);
 
 const configCmd = program
