@@ -525,28 +525,13 @@ export function LibraryView() {
         </div>
       )}
 
-      <div className={`columns-scroll${syncing ? " columns-syncing" : ""}`}>
-        <Column
-          id="master"
-          title="Master"
-          servers={data.master}
-          isMaster
-          isCopyMode={isCopyMode}
-          dropIndicator={dropIndicator}
-          onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
-          onDragOver={handleCardDragOver}
-          onDrop={handleDrop}
-          onDragLeave={() => setDropIndicator(null)}
-          onCardContextMenu={showCardCtxMenu}
-          onColContextMenu={showMasterCtxMenu}
-        />
-
-        {orderedClients.map((client, idx) => (
+      <div className="columns-scroll-wrapper">
+        <div className={`columns-scroll${syncing ? " columns-syncing" : ""}`}>
           <Column
-            key={client.name}
-            id={client.name}
-            title={client.name}
-            servers={client.servers}
+            id="master"
+            title="Master"
+            servers={data.master}
+            isMaster
             isCopyMode={isCopyMode}
             dropIndicator={dropIndicator}
             onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
@@ -554,14 +539,31 @@ export function LibraryView() {
             onDrop={handleDrop}
             onDragLeave={() => setDropIndicator(null)}
             onCardContextMenu={showCardCtxMenu}
-            onColContextMenu={(e) => showColCtxMenu(e, client)}
-            onColDragStart={() => { setDragging(null); setDraggingCol(client.name); }}
-            onColDragEnd={() => setDraggingCol(null)}
-            onMoveLeft={idx > 0 ? () => moveColumn(client.name, -1) : undefined}
-            onMoveRight={idx < orderedClients.length - 1 ? () => moveColumn(client.name, 1) : undefined}
-            isColDragging={draggingCol === client.name}
+            onColContextMenu={showMasterCtxMenu}
           />
-        ))}
+
+          {orderedClients.map((client, idx) => (
+            <Column
+              key={client.name}
+              id={client.name}
+              title={client.name}
+              servers={client.servers}
+              isCopyMode={isCopyMode}
+              dropIndicator={dropIndicator}
+              onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
+              onDragOver={handleCardDragOver}
+              onDrop={handleDrop}
+              onDragLeave={() => setDropIndicator(null)}
+              onCardContextMenu={showCardCtxMenu}
+              onColContextMenu={(e) => showColCtxMenu(e, client)}
+              onColDragStart={() => { setDragging(null); setDraggingCol(client.name); }}
+              onColDragEnd={() => setDraggingCol(null)}
+              onMoveLeft={idx > 0 ? () => moveColumn(client.name, -1) : undefined}
+              onMoveRight={idx < orderedClients.length - 1 ? () => moveColumn(client.name, 1) : undefined}
+              isColDragging={draggingCol === client.name}
+            />
+          ))}
+        </div>
       </div>
 
       {ctx && <ContextMenu x={ctx.x} y={ctx.y} items={ctx.items} onClose={() => setCtx(null)} />}

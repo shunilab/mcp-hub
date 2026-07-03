@@ -77,7 +77,8 @@ body, #root { height: 100vh; overflow: hidden; }
 .icon-btn.danger:hover { background: rgba(224,82,82,0.15); color: var(--danger); }
 
 .library-view { display: flex; flex-direction: column; height: 100%; }
-.columns-scroll { display: flex; gap: 12px; padding: 16px; overflow-x: auto; flex: 1; position: relative; }
+.columns-scroll-wrapper { position: relative; flex: 1; min-height: 0; display: flex; }
+.columns-scroll { display: flex; gap: 12px; padding: 16px; overflow-x: auto; flex: 1; min-width: 0; }
 
 .column {
   min-width: 240px; max-width: 280px;
@@ -312,7 +313,7 @@ kbd {
 }
 
 /* column scroll fade hint */
-.columns-scroll::after {
+.columns-scroll-wrapper::after {
   content: "";
   position: absolute; right: 0; top: 0; bottom: 0; width: 32px;
   background: linear-gradient(to right, transparent, var(--bg));
