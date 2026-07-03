@@ -32,12 +32,24 @@ fn install_cli(app: tauri::AppHandle) -> Result<String, String> {
         .ok_or("Bundled CLI not found in app resources")?;
     let node = find_node().ok_or("node not found")?;
 
+    // Copy the CLI out of the .app bundle into a stable, app-independent
+    // location so the installed shim keeps working after the app is moved,
+    // updated, or removed (the bundled resource path changes across those).
+    let stable_cli = dirs::home_dir()
+        .ok_or("Could not resolve home directory")?
+        .join(".mcp-hub").join("cli").join("index.js");
+    if let Some(parent) = stable_cli.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::copy(&cli_resource, &stable_cli)
+        .map_err(|e| format!("Failed to copy CLI to {}: {}", stable_cli.display(), e))?;
+
     let install_path = install_target();
     if let Some(parent) = install_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let cli_path = strip_windows_verbatim(&cli_resource.to_string_lossy());
+    let cli_path = strip_windows_verbatim(&stable_cli.to_string_lossy());
 
     #[cfg(windows)]
     {
@@ -202,7 +214,40 @@ fn expanded_path() -> String {
     if system_path.is_empty() { extra } else { format!("{extra}{sep}{system_path}") }
 }
 
+/// Find the newest installed node under a version-manager-style directory of
+/// `<versions_dir>/<vX.Y.Z or X.Y.Z>/bin/node` (nvm, mise) entries, sorting
+/// numerically (not lexically — "v10" must sort after "v9").
+fn newest_versioned_node(versions_dir: &std::path::Path) -> Option<String> {
+    let entries = std::fs::read_dir(versions_dir).ok()?;
+    let mut versions: Vec<(u64, u64, u64, std::path::PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let path = e.path();
+            let node_bin = if cfg!(windows) { path.join("node.exe") } else { path.join("bin").join("node") };
+            if !node_bin.exists() {
+                return None;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            let trimmed = name.strip_prefix('v').unwrap_or(&name);
+            let mut parts = trimmed.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+            let major = parts.next().unwrap_or(0);
+            let minor = parts.next().unwrap_or(0);
+            let patch = parts.next().unwrap_or(0);
+            Some((major, minor, patch, node_bin))
+        })
+        .collect();
+    versions.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    versions.pop().map(|(_, _, _, path)| path.to_string_lossy().to_string())
+}
+
 fn find_node() -> Option<String> {
+    // 0. Explicit override
+    if let Ok(path) = std::env::var("MCP_HUB_NODE") {
+        if std::path::Path::new(&path).exists() {
+            return Some(path);
+        }
+    }
+
     #[cfg(windows)]
     let candidates = vec![
         r"C:\Program Files\nodejs\node.exe".to_string(),
@@ -215,6 +260,9 @@ fn find_node() -> Option<String> {
         "/opt/homebrew/bin/node".to_string(),
         "/usr/local/bin/node".to_string(),
         "/usr/bin/node".to_string(),
+        dirs::home_dir().map(|h| h.join(".volta").join("bin").join("node").to_string_lossy().to_string()).unwrap_or_default(),
+        dirs::home_dir().map(|h| h.join(".fnm").join("aliases").join("default").join("bin").join("node").to_string_lossy().to_string()).unwrap_or_default(),
+        dirs::home_dir().map(|h| h.join(".local").join("share").join("fnm").join("aliases").join("default").join("bin").join("node").to_string_lossy().to_string()).unwrap_or_default(),
     ];
 
     for c in &candidates {
@@ -223,15 +271,42 @@ fn find_node() -> Option<String> {
         }
     }
 
-    // Shell fallback
+    // Version-manager directories that keep many installed versions side by
+    // side (nvm, mise) — pick the newest by numeric version, not by mtime.
+    if let Some(home) = dirs::home_dir() {
+        for versions_dir in [
+            home.join(".nvm").join("versions").join("node"),
+            home.join(".local").join("share").join("mise").join("installs").join("node"),
+        ] {
+            if let Some(node) = newest_versioned_node(&versions_dir) {
+                return Some(node);
+            }
+        }
+    }
+
+    // Shell fallback. Use a login shell so nvm/fnm/mise/volta shell hooks in
+    // .zshrc/.bash_profile run and put node on PATH — a bare `sh -c` (no
+    // login flag) skips rc files and misses these entirely. Login shells may
+    // print startup banners to stdout before the command output, so take the
+    // last non-empty line rather than the first.
     #[cfg(windows)]
     let shell_cmd = Command::new("cmd").args(["/C", "where node"]).env("PATH", expanded_path()).output();
     #[cfg(unix)]
-    let shell_cmd = Command::new("sh").args(["-c", "command -v node"]).env("PATH", expanded_path()).output();
+    let shell_cmd = {
+        let shell = std::env::var("SHELL").unwrap_or_default();
+        let shell = if shell.is_empty() || !std::path::Path::new(&shell).exists() {
+            if std::path::Path::new("/bin/zsh").exists() { "/bin/zsh".to_string() }
+            else { "/bin/sh".to_string() }
+        } else {
+            shell
+        };
+        Command::new(&shell).args(["-lc", "command -v node"]).env("PATH", expanded_path()).output()
+    };
 
     if let Ok(out) = shell_cmd {
-        let p = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string();
-        if !p.is_empty() {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let p = stdout.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).last().unwrap_or("").to_string();
+        if !p.is_empty() && std::path::Path::new(&p).exists() {
             return Some(p);
         }
     }

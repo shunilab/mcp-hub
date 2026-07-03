@@ -58,9 +58,13 @@ function loadUserAdapters(): Adapter[] {
   });
 }
 
+export function getBaseAdapters(): Adapter[] {
+  return [...BUILT_IN_ADAPTERS, ...loadUserAdapters()];
+}
+
 export function getAllAdapters(): Adapter[] {
   const overrides = loadOverrides();
-  const base = [...BUILT_IN_ADAPTERS, ...loadUserAdapters()];
+  const base = getBaseAdapters();
   return base.map((adapter) => {
     const override = overrides[adapter.name];
     if (!override) return adapter;

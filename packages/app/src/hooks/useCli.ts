@@ -86,3 +86,11 @@ export async function saveClientPaths(overrides: Record<string, string>): Promis
     await runCli(["config", "set-path", client, p]);
   }
 }
+
+export async function unsetClientPath(client: string): Promise<void> {
+  await runCli(["config", "unset-path", client]);
+}
+
+export async function setBackupTtlDays(days: number): Promise<void> {
+  await runCli(["config", "set-backup-ttl", String(days)]);
+}
