@@ -25,6 +25,7 @@ program
   .option("--from <client>", "Source: client name, 'master', or 'all'")
   .option("--to <client>", "Destination: client name or 'master'")
   .option("--server <name>", "Copy only this specific server")
+  .option("--create", "Also create config files for clients that don't have one yet (bulk sync only)")
   .action(sync);
 
 program

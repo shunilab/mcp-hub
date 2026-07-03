@@ -1,9 +1,10 @@
+import fs from "fs";
 import chalk from "chalk";
 import { loadHub, loadHubForWrite, saveHub } from "../hub.js";
 import { getAllAdapters, getAdapter } from "../adapters/index.js";
 
-export async function sync(options: { from?: string; to?: string; server?: string }) {
-  const { from, to, server: serverName } = options;
+export async function sync(options: { from?: string; to?: string; server?: string; create?: boolean }) {
+  const { from, to, server: serverName, create } = options;
 
   if (from && from !== "master" && from !== "all") {
     // client → master or client → client
@@ -79,6 +80,10 @@ export async function sync(options: { from?: string; to?: string; server?: strin
 
   for (const adapter of targets) {
     if (!adapter) continue;
+    if (!to && !create && !fs.existsSync(adapter.configPath())) {
+      console.log(chalk.gray(`  ${adapter.name}: skipped (no existing config; use --create to add)`));
+      continue;
+    }
     const existing = adapter.read() ?? {};
     adapter.write(adapter.merge(existing, masterServers));
     console.log(chalk.green(`✓ master → ${adapter.name}`));

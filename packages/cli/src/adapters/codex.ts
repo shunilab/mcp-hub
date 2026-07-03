@@ -59,6 +59,9 @@ export const codexAdapter: Adapter = {
         if (v.args) entry.args = v.args;
         if (v.env) entry.env = v.env;
         if (v.url) entry.url = v.url;
+        if (v.headers) {
+          console.error(`Warning: codex does not support "headers"; dropping headers for "${k}".`);
+        }
         return [k, entry];
       })
     );
