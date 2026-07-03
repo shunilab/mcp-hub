@@ -9,11 +9,12 @@ import { list } from "./commands/list.js";
 import { importFrom } from "./commands/import.js";
 import { status } from "./commands/status.js";
 import { undo } from "./commands/undo.js";
-import { configSetPath } from "./commands/config.js";
+import { configSetPath, configUnsetPath, configSetBackupTtl } from "./commands/config.js";
 import { clientAdd, clientRemove, clientList } from "./commands/clients.js";
 import { pruneOldBackups } from "./utils/fs.js";
+import { getBackupTtlDays } from "./settings.js";
 
-pruneOldBackups();
+pruneOldBackups(getBackupTtlDays());
 
 const program = new Command();
 
@@ -85,6 +86,16 @@ configCmd
   .command("set-path <client> <path>")
   .description("Override the config file path for a client")
   .action(configSetPath);
+
+configCmd
+  .command("unset-path <client>")
+  .description("Reset a client's config file path to its default")
+  .action(configUnsetPath);
+
+configCmd
+  .command("set-backup-ttl <days>")
+  .description("Set how many days to keep backups before pruning")
+  .action(configSetBackupTtl);
 
 const clientCmd = program
   .command("client")

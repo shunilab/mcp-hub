@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from "react";
-import { runCli, installCli, uninstallCli, cliInstallStatus, saveClientPaths, listCustomClients, addCustomClient, removeCustomClient, CustomClientConfig } from "../hooks/useCli";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { fetchStatus, installCli, uninstallCli, cliInstallStatus, saveClientPaths, unsetClientPath, setBackupTtlDays, listCustomClients, addCustomClient, removeCustomClient, CustomClientConfig } from "../hooks/useCli";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Save, Terminal, Check, X, RotateCcw, Plus, Trash2 } from "lucide-react";
 
 interface ClientPath {
   name: string;
   defaultPath: string;
+  initialPath: string;
   path: string;
 }
 
@@ -23,6 +24,10 @@ export function SettingsView() {
   const [draft, setDraft] = useState({ id: "", configPath: "", rootKey: "mcpServers", format: "json" as "json" | "toml" | "yaml" });
   const [clientError, setClientError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [backupTtlDays, setBackupTtlDaysState] = useState(7);
+  const [backupTtlInitial, setBackupTtlInitial] = useState(7);
+  const [backupTtlSaved, setBackupTtlSaved] = useState(false);
+  const backupTtlSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function detectFormat(p: string): "json" | "toml" | "yaml" | null {
     const ext = p.split(".").pop()?.toLowerCase() ?? "";
@@ -39,39 +44,69 @@ export function SettingsView() {
       : null;
 
   useEffect(() => {
-    return () => { if (savedTimerRef.current) clearTimeout(savedTimerRef.current); };
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+      if (backupTtlSavedTimerRef.current) clearTimeout(backupTtlSavedTimerRef.current);
+    };
+  }, []);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const data = await fetchStatus();
+      setPaths(
+        data.clients.map((c) => ({
+          name: c.name,
+          defaultPath: c.defaultConfigPath,
+          initialPath: c.configPath,
+          path: c.configPath,
+        }))
+      );
+      setBackupTtlDaysState(data.settings.backupTtlDays);
+      setBackupTtlInitial(data.settings.backupTtlDays);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    runCli(["status", "--json"])
-      .then((raw) => {
-        const data = JSON.parse(raw);
-        setPaths(
-          (data.clients as Array<{ name: string; configPath: string }>).map((c) => ({
-            name: c.name,
-            defaultPath: c.configPath,
-            path: c.configPath,
-          }))
-        );
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-
+    loadStatus().catch(() => setLoading(false));
     cliInstallStatus().then(setCliInstalled);
     listCustomClients().then(setCustomClients).catch(() => {});
-  }, []);
+  }, [loadStatus]);
 
   async function handleSave() {
-    const changed = paths.filter((p) => p.path !== p.defaultPath);
+    const changed = paths.filter((p) => p.path !== p.initialPath);
     if (!changed.length) return;
     setCliLoading(true);
     setCliError(null);
     try {
-      const overrides = Object.fromEntries(changed.map((p) => [p.name, p.path]));
-      await saveClientPaths(overrides);
+      const toReset = changed.filter((p) => p.path === p.defaultPath);
+      const toSet = changed.filter((p) => p.path !== p.defaultPath);
+      for (const p of toReset) await unsetClientPath(p.name);
+      if (toSet.length) {
+        const overrides = Object.fromEntries(toSet.map((p) => [p.name, p.path]));
+        await saveClientPaths(overrides);
+      }
+      await loadStatus();
       setSaved(true);
       if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setCliError(String(e));
+    } finally {
+      setCliLoading(false);
+    }
+  }
+
+  async function handleSaveBackupTtl() {
+    setCliLoading(true);
+    setCliError(null);
+    try {
+      await setBackupTtlDays(backupTtlDays);
+      setBackupTtlInitial(backupTtlDays);
+      setBackupTtlSaved(true);
+      if (backupTtlSavedTimerRef.current) clearTimeout(backupTtlSavedTimerRef.current);
+      backupTtlSavedTimerRef.current = setTimeout(() => setBackupTtlSaved(false), 2000);
     } catch (e) {
       setCliError(String(e));
     } finally {
@@ -221,7 +256,7 @@ export function SettingsView() {
         <button
           className="btn primary"
           onClick={handleSave}
-          disabled={cliLoading || paths.every((p) => p.path === p.defaultPath)}
+          disabled={cliLoading || paths.every((p) => p.path === p.initialPath)}
         >
           <Save size={14} /> {saved ? "Saved!" : "Save"}
         </button>
@@ -311,8 +346,26 @@ export function SettingsView() {
         <p className="settings-hint">Backups older than this are automatically deleted.</p>
         <div className="settings-row">
           <label className="settings-label">Days to keep</label>
-          <input className="settings-input" type="number" defaultValue={7} min={1} max={90} style={{ width: 80 }} />
+          <input
+            className="settings-input"
+            type="number"
+            value={backupTtlDays}
+            min={1}
+            max={90}
+            style={{ width: 80 }}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) setBackupTtlDaysState(n);
+            }}
+          />
         </div>
+        <button
+          className="btn primary"
+          onClick={handleSaveBackupTtl}
+          disabled={cliLoading || backupTtlDays === backupTtlInitial || backupTtlDays < 1}
+        >
+          <Save size={14} /> {backupTtlSaved ? "Saved!" : "Save"}
+        </button>
       </section>
     </div>
 
