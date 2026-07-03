@@ -18,16 +18,17 @@ type OpenCodeServer = {
   enabled?: boolean;
 };
 
-function toOpenCode(server: McpServer): OpenCodeServer {
+function toOpenCode(server: McpServer, existingEnabled?: boolean): OpenCodeServer {
+  const enabled = existingEnabled ?? true;
   if (server.url) {
-    return { type: "remote", url: server.url, headers: server.headers, enabled: true };
+    return { type: "remote", url: server.url, headers: server.headers, enabled };
   }
   return {
     type: "local",
     command: server.command,
     args: server.args,
     env: server.env,
-    enabled: true,
+    enabled,
   };
 }
 
@@ -69,8 +70,9 @@ export const opencodeAdapter: Adapter = {
         throw new Error(`${p} is corrupted and cannot be safely updated. Fix or remove it, then retry.`);
       }
     }
+    const existingMcp = (existing.mcp as Record<string, OpenCodeServer> | undefined) ?? {};
     existing.mcp = Object.fromEntries(
-      Object.entries(servers).map(([k, v]) => [k, toOpenCode(v)])
+      Object.entries(servers).map(([k, v]) => [k, toOpenCode(v, existingMcp[k]?.enabled)])
     );
     return safeWrite(p, JSON.stringify(existing, null, 2));
   },
