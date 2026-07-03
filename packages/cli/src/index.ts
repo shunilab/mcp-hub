@@ -37,6 +37,7 @@ program
   .option("--url <url>", "URL for remote servers")
   .option("--env <pairs>", "Env vars as KEY=VAL,KEY2=VAL2")
   .option("--json <spec>", "Full server spec as a JSON string (overrides other options)")
+  .option("--force", "Overwrite an existing server with the same name")
   .action(add);
 
 program

@@ -25,8 +25,10 @@ export async function importFrom(client: string): Promise<void> {
   await runCli(["import", "--from", client]);
 }
 
-export async function addServer(name: string, server: McpServer): Promise<void> {
-  await runCli(["add", name, "--json", JSON.stringify(server)]);
+export async function addServer(name: string, server: McpServer, force?: boolean): Promise<void> {
+  const args = ["add", name, "--json", JSON.stringify(server)];
+  if (force) args.push("--force");
+  await runCli(args);
 }
 
 export async function removeServer(name: string, from?: string): Promise<void> {
