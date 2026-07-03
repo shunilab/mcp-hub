@@ -1,21 +1,28 @@
 import chalk from "chalk";
 import { loadHub, getHubFile } from "../hub.js";
 import { getAllAdapters } from "../adapters/index.js";
+import { McpServer } from "../types.js";
 
 export interface ClientStatus {
   name: string;
   configPath: string;
-  servers: Record<string, unknown>;
+  servers: Record<string, McpServer>;
   configExists: boolean;
   shared: string[];
   masterOnly: string[];
   clientOnly: string[];
 }
 
+export interface StatusResult {
+  master: Record<string, McpServer>;
+  masterConfigPath: string;
+  clients: ClientStatus[];
+}
+
 export function status(options: { json?: boolean } = {}) {
   const hub = loadHub();
   const masterKeys = new Set(Object.keys(hub.mcpServers));
-  const result: { master: Record<string, unknown>; masterConfigPath: string; clients: ClientStatus[] } = {
+  const result: StatusResult = {
     master: hub.mcpServers,
     masterConfigPath: getHubFile(),
     clients: [],

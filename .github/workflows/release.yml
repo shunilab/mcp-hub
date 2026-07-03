@@ -50,6 +50,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build CLI
+        run: pnpm --filter cli build
+
       - name: Build CLI bundle
         run: pnpm --filter cli build:bundle
 

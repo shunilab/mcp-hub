@@ -3,6 +3,8 @@
   "version": "0.1.1",
   "description": "MCP configuration hub CLI",
   "type": "module",
+  "main": "./dist/public.js",
+  "types": "./dist/public.d.ts",
   "bin": {
     "mcp-hub": "./dist/index.js"
   },
