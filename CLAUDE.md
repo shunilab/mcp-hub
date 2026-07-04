@@ -63,3 +63,6 @@ The CLI maintains a single source of truth at `~/.mcp-hub/servers.json` (`HubCon
 
 ### Release workflow
 `.github/workflows/release.yml` builds on macOS, Windows, and Ubuntu, signs with Tauri's updater key, and publishes GitHub releases with installers. The workflow bundles `cli/dist/bundle.cjs` into the Tauri resources before building.
+
+<!-- agent-mem -->
+このプロジェクトには `.memory/` があります。作業前に `.memory/index.md` を読んでください。
