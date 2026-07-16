@@ -11,6 +11,36 @@ interface DragState { name: string; from: string; }
 interface CtxState { x: number; y: number; items: MenuItem[]; }
 interface ConfirmState { message: string; confirmLabel?: string; onConfirm: () => void; }
 interface DropIndicator { column: string; beforeName: string | null; }
+interface Notice { message: string; undoable: boolean; }
+
+// ── optimistic update helpers ───────────────────────────────────────────────
+
+function columnServers(data: StatusResult, column: string): Record<string, McpServer> {
+  return column === "master" ? data.master : data.clients.find((c) => c.name === column)?.servers ?? {};
+}
+
+function withColumnServers(data: StatusResult, column: string, servers: Record<string, McpServer>): StatusResult {
+  if (column === "master") return { ...data, master: servers };
+  return { ...data, clients: data.clients.map((c) => (c.name === column ? { ...c, servers } : c)) };
+}
+
+// Move or copy `name` from `from` to `to`. Mirrors the CLI's `sync --move` semantics:
+// a new key is appended at the destination, an existing key keeps its position.
+function applyTransfer(data: StatusResult, from: string, to: string, name: string, move: boolean): StatusResult {
+  const server = columnServers(data, from)[name];
+  if (!server) return data;
+  let next = withColumnServers(data, to, { ...columnServers(data, to), [name]: server });
+  if (move) {
+    const { [name]: _omit, ...rest } = columnServers(next, from);
+    next = withColumnServers(next, from, rest);
+  }
+  return next;
+}
+
+function applyReorder(data: StatusResult, column: string, orderedKeys: string[]): StatusResult {
+  const servers = columnServers(data, column);
+  return withColumnServers(data, column, Object.fromEntries(orderedKeys.map((k) => [k, servers[k]])));
+}
 
 // ── ServerCard ────────────────────────────────────────────────────────────────
 
@@ -19,13 +49,14 @@ interface ServerCardProps {
   server: McpServer;
   columnName: string;
   isCopyMode: boolean;
+  isPending: boolean;
   dropIndicator: DropIndicator | null;
   onDragStart: (name: string, from: string) => void;
   onDragOver: (e: React.DragEvent, name: string, column: string) => void;
   onContextMenu: (e: React.MouseEvent, name: string, columnName: string) => void;
 }
 
-function ServerCard({ name, server, columnName, isCopyMode, dropIndicator, onDragStart, onDragOver, onContextMenu }: ServerCardProps) {
+function ServerCard({ name, server, columnName, isCopyMode, isPending, dropIndicator, onDragStart, onDragOver, onContextMenu }: ServerCardProps) {
   const desc = server.command
     ? `${server.command} ${(server.args ?? []).join(" ")}`
     : server.url ?? "";
@@ -36,11 +67,11 @@ function ServerCard({ name, server, columnName, isCopyMode, dropIndicator, onDra
     <>
       {showIndicator && <div className="drop-indicator" />}
       <div
-        className={`server-card ${isCopyMode ? "copy-mode" : ""}`}
-        draggable
+        className={`server-card ${isCopyMode ? "copy-mode" : ""} ${isPending ? "pending" : ""}`}
+        draggable={!isPending}
         onDragStart={() => onDragStart(name, columnName)}
         onDragOver={(e) => onDragOver(e, name, columnName)}
-        onContextMenu={(e) => { e.preventDefault(); onContextMenu(e, name, columnName); }}
+        onContextMenu={(e) => { if (isPending) return; e.preventDefault(); onContextMenu(e, name, columnName); }}
       >
         <div className="server-card-header">
           <Server size={14} />
@@ -61,6 +92,7 @@ interface ColumnProps {
   isMaster?: boolean;
   isCopyMode: boolean;
   dropIndicator: DropIndicator | null;
+  pendingKeys: Set<string>;
   onDragStart: (name: string, from: string) => void;
   onDragOver: (e: React.DragEvent, cardName: string, column: string) => void;
   onDrop: (to: string) => void;
@@ -76,7 +108,7 @@ interface ColumnProps {
 
 function Column({
   title, id, servers, isMaster, isCopyMode,
-  dropIndicator, onDragStart, onDragOver, onDrop, onDragLeave,
+  dropIndicator, pendingKeys, onDragStart, onDragOver, onDrop, onDragLeave,
   onCardContextMenu, onColContextMenu,
   onColDragStart, onColDragEnd, onMoveLeft, onMoveRight, isColDragging,
 }: ColumnProps) {
@@ -127,6 +159,7 @@ function Column({
             server={server}
             columnName={id}
             isCopyMode={isCopyMode}
+            isPending={pendingKeys.has(`${id}/${name}`)}
             dropIndicator={dropIndicator}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
@@ -157,7 +190,7 @@ export function LibraryView() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [draggingCol, setDraggingCol] = useState<string | null>(null);
   const [clientOrder, setClientOrder] = useState<string[]>([]);
@@ -165,6 +198,7 @@ export function LibraryView() {
   const [ctx, setCtx] = useState<CtxState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
 
   // Track Cmd/Ctrl for copy-vs-move drag
   useEffect(() => {
@@ -175,25 +209,31 @@ export function LibraryView() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, []);
 
+  // Re-fetches server state without touching loading/error, so it can be used
+  // to reconcile after both successful and failed optimistic updates.
+  const reconcile = useCallback(async () => {
+    const [result, custom] = await Promise.all([fetchStatus(), listCustomClients().catch(() => ({}))]);
+    setData(result);
+    setCustomClientIds(new Set(Object.keys(custom)));
+    setClientOrder((prev) => {
+      const names = result.clients.map((c) => c.name);
+      const kept = prev.filter((n) => names.includes(n));
+      const added = names.filter((n) => !prev.includes(n));
+      return [...kept, ...added];
+    });
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [result, custom] = await Promise.all([fetchStatus(), listCustomClients().catch(() => ({}))]);
-      setData(result);
-      setCustomClientIds(new Set(Object.keys(custom)));
-      setClientOrder((prev) => {
-        const names = result.clients.map((c) => c.name);
-        const kept = prev.filter((n) => names.includes(n));
-        const added = names.filter((n) => !prev.includes(n));
-        return [...kept, ...added];
-      });
+      await reconcile();
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reconcile]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -204,18 +244,28 @@ export function LibraryView() {
     return () => clearTimeout(t);
   }, [notice]);
 
+  // Serializes CLI-backed calls into a single FIFO chain, so concurrent
+  // operations never race on the same config files or split across txns.
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueue = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = queueRef.current.then(fn);
+    queueRef.current = run.then(() => {}, () => {});
+    return run;
+  }, []);
+
   // Runs a CLI-backed action with unified syncing/error state and a post-load refresh.
   const runAction = useCallback(async (fn: () => Promise<void>) => {
     setSyncing(true);
     try {
-      await fn();
+      await enqueue(fn);
       await load();
     } catch (e) {
       setError(String(e));
+      await reconcile().catch(() => {});
     } finally {
       setSyncing(false);
     }
-  }, [load]);
+  }, [enqueue, load, reconcile]);
 
   // ── column order ──────────────────────────────────────────────────────────
 
@@ -253,10 +303,16 @@ export function LibraryView() {
     }
   }
 
-  const syncingRef = useRef(false);
+  // A pending op has finished; if none remain, reconcile with the CLI's view
+  // to pick up server ordering/normalization and any derived status fields.
+  const pendingCountRef = useRef(0);
+  function settlePending(key: string) {
+    setPendingKeys((prev) => { const next = new Set(prev); next.delete(key); return next; });
+    pendingCountRef.current -= 1;
+    if (pendingCountRef.current === 0) reconcile().catch((e) => setError(String(e)));
+  }
 
-  async function handleDrop(to: string) {
-    if (syncingRef.current) return;
+  function handleDrop(to: string) {
     if (draggingCol) {
       const fromCol = draggingCol;
       setDraggingCol(null);
@@ -279,29 +335,44 @@ export function LibraryView() {
     const indicator = dropIndicator;
     setDragging(null);
     setDropIndicator(null);
+    setNotice(null); // clear any stale undo toast before this drop's own state settles
 
     // Intra-column reorder
     if (from === to) {
       if (!indicator || indicator.column !== to) return;
       if (!data) return;
-      const servers = to === "master"
-        ? data.master
-        : data.clients.find((c) => c.name === to)?.servers ?? {};
+      const servers = columnServers(data, to);
       const keys = Object.keys(servers).filter((k) => k !== name);
       const insertIdx = indicator.beforeName ? keys.indexOf(indicator.beforeName) : keys.length;
       keys.splice(insertIdx, 0, name);
-      syncingRef.current = true;
-      await runAction(async () => { await reorderServers(to, keys); });
-      syncingRef.current = false;
+
+      setData((prev) => prev && applyReorder(prev, to, keys));
+      const key = `${to}/${name}`;
+      setPendingKeys((prev) => new Set(prev).add(key));
+      pendingCountRef.current += 1;
+      enqueue(() => reorderServers(to, keys))
+        .catch((e) => setError(`"${name}" の並び替えに失敗しました\n${e}`))
+        .finally(() => settlePending(key));
       return;
     }
 
     // Inter-column: copy, or move (copy + remove from source in one CLI call)
-    syncingRef.current = true;
-    await runAction(async () => {
-      await syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name, !copyMode);
-    });
-    syncingRef.current = false;
+    const move = !copyMode;
+    setData((prev) => prev && applyTransfer(prev, from, to, name, move));
+    const key = `${to}/${name}`;
+    setPendingKeys((prev) => new Set(prev).add(key));
+    pendingCountRef.current += 1;
+    enqueue(() => syncFromTo(from === "master" ? undefined : from, to === "master" ? "master" : to, name, move))
+      .then(() => {
+        setNotice(move
+          ? { message: `"${name}" を ${from} → ${to} に移動しました`, undoable: true }
+          : { message: `"${name}" を ${to} にコピーしました`, undoable: true });
+      })
+      .catch((e) => {
+        const verb = move ? "移動" : "コピー";
+        setError(`"${name}" の ${from} → ${to} への${verb}に失敗しました\n${e}`);
+      })
+      .finally(() => settlePending(key));
   }
 
   // ── delete with confirm ───────────────────────────────────────────────────
@@ -322,13 +393,19 @@ export function LibraryView() {
   const handleUndo = useCallback(async () => {
     await runAction(async () => {
       const result = await undoLast();
-      setNotice(
-        result.restored.length === 0
+      setNotice({
+        message: result.restored.length === 0
           ? "復元するバックアップがありません"
-          : `復元しました: ${result.restored.join(", ")}`
-      );
+          : `復元しました: ${result.restored.join(", ")}`,
+        undoable: false,
+      });
     });
   }, [runAction]);
+
+  function handleToastUndo() {
+    setNotice(null); // clear immediately so a double-click can't trigger undo twice
+    handleUndo();
+  }
 
   // Keyboard shortcuts: Cmd+Z = undo, Cmd+R = refresh. Ignored while typing in
   // a field or while a modal dialog is open, so they don't fire underneath it.
@@ -512,7 +589,7 @@ export function LibraryView() {
       {error && (
         <div className="error-banner" role="alert">
           <AlertCircle size={16} />
-          <span>{error}</span>
+          <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
           <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
         </div>
       )}
@@ -520,7 +597,12 @@ export function LibraryView() {
       {notice && (
         <div className="success-banner" role="status">
           <CheckCircle2 size={16} />
-          <span>{notice}</span>
+          <span>{notice.message}</span>
+          {notice.undoable && (
+            <button className="btn small secondary banner-action" onClick={handleToastUndo}>
+              <Undo2 size={12} /> 元に戻す
+            </button>
+          )}
           <button className="icon-btn" aria-label="閉じる" onClick={() => setNotice(null)}><X size={14} /></button>
         </div>
       )}
@@ -534,6 +616,7 @@ export function LibraryView() {
             isMaster
             isCopyMode={isCopyMode}
             dropIndicator={dropIndicator}
+            pendingKeys={pendingKeys}
             onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
             onDragOver={handleCardDragOver}
             onDrop={handleDrop}
@@ -550,6 +633,7 @@ export function LibraryView() {
               servers={client.servers}
               isCopyMode={isCopyMode}
               dropIndicator={dropIndicator}
+              pendingKeys={pendingKeys}
               onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
               onDragOver={handleCardDragOver}
               onDrop={handleDrop}

@@ -121,6 +121,7 @@ body, #root { height: 100vh; overflow: hidden; }
 }
 .server-card:hover { border-color: var(--accent); background: var(--bg-hover); }
 .server-card:active { cursor: grabbing; }
+.server-card.pending { opacity: 0.55; pointer-events: none; }
 .server-card-header {
   display: flex; align-items: center; gap: 6px;
   margin-bottom: 4px; color: var(--text-muted);
@@ -295,6 +296,8 @@ body, #root { height: 100vh; overflow: hidden; }
   background: rgba(72,178,120,0.12); color: #3fa76a; border: 1px solid rgba(72,178,120,0.3);
 }
 .error-banner .icon-btn, .warn-banner .icon-btn, .success-banner .icon-btn { margin-left: auto; }
+.success-banner .banner-action { margin-left: auto; }
+.success-banner .banner-action ~ .icon-btn { margin-left: 0; }
 
 /* inline field validation errors */
 .field-error { font-size: 12px; color: var(--danger); margin-top: 4px; }
