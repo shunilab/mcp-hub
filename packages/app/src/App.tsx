@@ -12,7 +12,7 @@ export default function App() {
     <div className="app">
       <Sidebar current={view} onChange={setView} />
       <main className="content">
-        {view === "library" && <LibraryView />}
+        {view === "library" && <LibraryView onGoToDiscover={() => setView("discover")} />}
         {view === "discover" && <DiscoverView />}
         {view === "settings" && <SettingsView />}
       </main>

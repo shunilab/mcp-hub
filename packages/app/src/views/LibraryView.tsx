@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-shell";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, listCustomClients, removeCustomClient, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
+import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, listCustomClients, removeCustomClient, importFrom, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, AlertCircle, CheckCircle2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, RefreshCw, Undo2, Trash2, Server, GripVertical, FolderOpen, Copy, ArrowDownToLine, Upload, Compass, AlertCircle, CheckCircle2, X } from "lucide-react";
 
 // ── types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,42 @@ function cardBadges(client: ClientStatus): Record<string, CardBadge> {
   for (const name of client.clientOnly ?? []) badges[name] = "hub-only";
   for (const name of client.drifted ?? []) badges[name] = "drift";
   return badges;
+}
+
+// ── error translation ───────────────────────────────────────────────────────
+
+interface TranslatedError { title: string; detail: string; actionLabel?: string; onAction?: () => void; }
+
+// Turns a raw CLI/Tauri error string into a human message + optional next
+// step for the failure patterns we actually see. Anything unrecognized falls
+// back to showing the raw text, so we never hide information.
+function translateError(raw: string, helpers: { openUrl: (url: string) => void; copyText: (text: string) => void }): TranslatedError {
+  if (/node not found/i.test(raw)) {
+    return {
+      title: "Node.js が見つかりません",
+      detail: raw,
+      actionLabel: "インストール手順を開く",
+      onAction: () => helpers.openUrl("https://nodejs.org/"),
+    };
+  }
+  const pathMatch = raw.match(/'([^']+)'/);
+  if (/EACCES/i.test(raw)) {
+    return {
+      title: "設定ファイルへの書き込み権限がありません",
+      detail: pathMatch ? `対象: ${pathMatch[1]}\n\n${raw}` : raw,
+      actionLabel: pathMatch ? "パスをコピー" : undefined,
+      onAction: pathMatch ? () => helpers.copyText(pathMatch[1]) : undefined,
+    };
+  }
+  if (/ENOENT/i.test(raw)) {
+    return {
+      title: "ファイルが見つかりません",
+      detail: pathMatch ? `対象: ${pathMatch[1]}\n\n${raw}` : raw,
+      actionLabel: pathMatch ? "パスをコピー" : undefined,
+      onAction: pathMatch ? () => helpers.copyText(pathMatch[1]) : undefined,
+    };
+  }
+  return { title: "エラーが発生しました", detail: raw };
 }
 
 // ── optimistic update helpers ───────────────────────────────────────────────
@@ -114,6 +150,7 @@ interface ColumnProps {
   dropIndicator: DropIndicator | null;
   pendingKeys: Set<string>;
   cardBadges?: Record<string, CardBadge>;
+  emptyContent?: React.ReactNode;
   onDragStart: (name: string, from: string) => void;
   onDragOver: (e: React.DragEvent, cardName: string, column: string) => void;
   onDrop: (to: string) => void;
@@ -129,7 +166,7 @@ interface ColumnProps {
 
 function Column({
   title, id, servers, isMaster, isCopyMode,
-  dropIndicator, pendingKeys, cardBadges, onDragStart, onDragOver, onDrop, onDragLeave,
+  dropIndicator, pendingKeys, cardBadges, emptyContent, onDragStart, onDragOver, onDrop, onDragLeave,
   onCardContextMenu, onColContextMenu,
   onColDragStart, onColDragEnd, onMoveLeft, onMoveRight, isColDragging,
 }: ColumnProps) {
@@ -194,9 +231,9 @@ function Column({
         )}
         {Object.keys(servers).length === 0 && (
           <div className="column-empty">
-            {isMaster
+            {emptyContent ?? (isMaster
               ? <><strong>No servers yet.</strong><br />Use Discover to add your first server.</>
-              : "Drop servers here to sync from Master"}
+              : "Drop servers here to sync from Master")}
           </div>
         )}
       </div>
@@ -206,7 +243,11 @@ function Column({
 
 // ── LibraryView ───────────────────────────────────────────────────────────────
 
-export function LibraryView() {
+interface LibraryViewProps {
+  onGoToDiscover: () => void;
+}
+
+export function LibraryView({ onGoToDiscover }: LibraryViewProps) {
   const [data, setData] = useState<StatusResult | null>(null);
   const [customClientIds, setCustomClientIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -477,6 +518,27 @@ export function LibraryView() {
     try { await navigator.clipboard.writeText(configPath); } catch (e) { setError(String(e)); }
   }
 
+  function renderError() {
+    if (!error) return null;
+    const t = translateError(error, {
+      openUrl: (url) => { open(url).catch(() => {}); },
+      copyText: (text) => { navigator.clipboard.writeText(text).catch(() => {}); },
+    });
+    return (
+      <div className="error-banner" role="alert">
+        <AlertCircle size={16} />
+        <div className="error-banner-body">
+          <div className="error-banner-title">{t.title}</div>
+          <div style={{ whiteSpace: "pre-wrap" }}>{t.detail}</div>
+        </div>
+        {t.actionLabel && (
+          <button className="btn small secondary banner-action" onClick={t.onAction}>{t.actionLabel}</button>
+        )}
+        <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
+      </div>
+    );
+  }
+
   // ── context menus ─────────────────────────────────────────────────────────
 
   function showCardCtxMenu(e: React.MouseEvent, serverName: string, columnId: string) {
@@ -508,6 +570,21 @@ export function LibraryView() {
         onClick: () => askDelete(serverName, columnId === "master" ? undefined : columnId),
       },
     ];
+    setCtx({ x: e.clientX, y: e.clientY, items });
+  }
+
+  // Clients whose config already has servers — candidates to import into an
+  // empty master, for the Library empty-state "取り込む" action.
+  function importCandidates(): ClientStatus[] {
+    return data ? data.clients.filter((c) => c.configExists && Object.keys(c.servers).length > 0) : [];
+  }
+
+  function showImportMenu(e: React.MouseEvent) {
+    const items: MenuItem[] = importCandidates().map((c) => ({
+      label: `  ← ${c.name} (${Object.keys(c.servers).length})`,
+      icon: <Upload size={12} />,
+      onClick: () => runAction(async () => { await importFrom(c.name); }),
+    }));
     setCtx({ x: e.clientX, y: e.clientY, items });
   }
 
@@ -590,13 +667,7 @@ export function LibraryView() {
             <button className="btn secondary" onClick={load}><RefreshCw size={14} /> Retry</button>
           </div>
         </div>
-        {error && (
-          <div className="error-banner" role="alert">
-            <AlertCircle size={16} />
-            <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
-            <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
-          </div>
-        )}
+        {renderError()}
       </div>
     );
   }
@@ -620,13 +691,7 @@ export function LibraryView() {
         </div>
       </div>
 
-      {error && (
-        <div className="error-banner" role="alert">
-          <AlertCircle size={16} />
-          <span style={{ whiteSpace: "pre-wrap" }}>{error}</span>
-          <button className="icon-btn" aria-label="閉じる" onClick={() => setError(null)}><X size={14} /></button>
-        </div>
-      )}
+      {renderError()}
 
       {notice && (
         <div className="success-banner" role="status">
@@ -651,6 +716,21 @@ export function LibraryView() {
             isCopyMode={isCopyMode}
             dropIndicator={dropIndicator}
             pendingKeys={pendingKeys}
+            emptyContent={
+              <>
+                <strong>まだサーバーがありません。</strong>
+                <div className="empty-actions">
+                  {importCandidates().length > 0 && (
+                    <button className="btn secondary" onClick={showImportMenu}>
+                      <Upload size={14} /> 既存クライアントから取り込む
+                    </button>
+                  )}
+                  <button className="btn secondary" onClick={onGoToDiscover}>
+                    <Compass size={14} /> Discoverから探す
+                  </button>
+                </div>
+              </>
+            }
             onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
             onDragOver={handleCardDragOver}
             onDrop={handleDrop}
