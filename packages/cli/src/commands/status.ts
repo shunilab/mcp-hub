@@ -14,6 +14,22 @@ export interface ClientStatus {
   shared: string[];
   masterOnly: string[];
   clientOnly: string[];
+  drifted: string[];
+}
+
+// Order-independent deep equality for McpServer values (which allow
+// arbitrary passthrough keys), so key reordering alone isn't reported as drift.
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function serversDiffer(a: McpServer, b: McpServer): boolean {
+  return stableStringify(a) !== stableStringify(b);
 }
 
 export interface StatusResult {
@@ -42,7 +58,7 @@ export function status(options: { json?: boolean } = {}) {
     const overridden = configPath !== defaultConfigPath;
     const servers = adapter.read();
     if (!servers) {
-      result.clients.push({ name: adapter.name, configPath, defaultConfigPath, overridden, servers: {}, configExists: false, shared: [], masterOnly: [...masterKeys], clientOnly: [] });
+      result.clients.push({ name: adapter.name, configPath, defaultConfigPath, overridden, servers: {}, configExists: false, shared: [], masterOnly: [...masterKeys], clientOnly: [], drifted: [] });
       if (!options.json) console.log(`  ${chalk.gray(adapter.name)}: ${chalk.yellow("no config file")}`);
       continue;
     }
@@ -51,14 +67,16 @@ export function status(options: { json?: boolean } = {}) {
     const shared = [...clientKeys].filter((k) => masterKeys.has(k));
     const masterOnly = [...masterKeys].filter((k) => !clientKeys.has(k));
     const clientOnly = [...clientKeys].filter((k) => !masterKeys.has(k));
+    const drifted = shared.filter((k) => serversDiffer(hub.mcpServers[k], servers[k]));
 
-    result.clients.push({ name: adapter.name, configPath, defaultConfigPath, overridden, servers, configExists: true, shared, masterOnly, clientOnly });
+    result.clients.push({ name: adapter.name, configPath, defaultConfigPath, overridden, servers, configExists: true, shared, masterOnly, clientOnly, drifted });
 
     if (!options.json) {
       console.log(`\n  ${chalk.bold(adapter.name)}: ${clientKeys.size} servers`);
       if (shared.length) console.log(`    ${chalk.green("shared:")} ${shared.join(", ")}`);
       if (masterOnly.length) console.log(`    ${chalk.yellow("master only:")} ${masterOnly.join(", ")}`);
       if (clientOnly.length) console.log(`    ${chalk.cyan("client only:")} ${clientOnly.join(", ")}`);
+      if (drifted.length) console.log(`    ${chalk.magenta("drift:")} ${drifted.join(", ")}`);
     }
   }
 

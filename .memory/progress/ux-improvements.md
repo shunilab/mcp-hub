@@ -28,9 +28,12 @@
 
 ## 実装状況
 
-- **第1弾（6 + 3）: 実装完了・動作確認済み（2026-07-17）** — `packages/app/src/views/LibraryView.tsx` / `App.css` を変更。楽観的UI（ドロップ即時反映、CLI呼び出しはFIFOキューで直列化、失敗時はreconcileでロールバック）＋undoableトースト（成功時「元に戻す」ボタン付きバナー）。ユーザーが実アプリ（`tauri dev`）で全項目手動確認しOK。**未コミット**
-- プランは `/Users/shuni/.claude/plans/radiant-popping-nygaard.md` に保存済み
+- **第1弾（6 + 3）: 実装完了・動作確認済み・コミット済み（2026-07-17, commit d0ae7da）** — `packages/app/src/views/LibraryView.tsx` / `App.css`。楽観的UI（ドロップ即時反映、CLI呼び出しはFIFOキューで直列化、失敗時はreconcileでロールバック）＋undoableトースト（成功時「元に戻す」ボタン付きバナー）
+- **第2弾（2: 外部変更検出）: 実装完了・動作確認済み（2026-07-17）** — スコープは(b) master/client差分の可視化＋drift検出（ユーザー確認済み、「最後にmcp-hubが書いた内容」を追跡する新規インフラ(a)は作らない方針）。`packages/cli/src/commands/status.ts` に `ClientStatus.drifted`（同名だが中身が違うキー、キー順非依存のdeep比較）を追加。`LibraryView.tsx` にクライアント列限定でバッジ（`hub外`=clientOnly、`差分`=drifted）＋ウィンドウフォーカス復帰時の自動`reconcile()`（pending中はスキップ）。**未コミット**
+  - ハマりどころ: `tauri dev` は `target/debug/cli.cjs`（過去のビルドで残った古いバンドル）を最優先で使うため、CLI型を変更しても反映されず白画面クラッシュを起こした。詳細は `.memory/pitfalls.md` に記録済み。対策として `cardBadges()` はフィールド欠落に対して `?? []` で防御的にしてある
+- プランは `/Users/shuni/.claude/plans/radiant-popping-nygaard.md` に保存済み（第2弾の内容で上書き済み）
 
 ## 次のアクション
 
-- 次は第2弾（2: 外部変更検出 → 1: 差分プレビュー）
+- 第2弾をコミットする
+- 次は第3弾（5: 空状態 → 4: エラー翻訳）

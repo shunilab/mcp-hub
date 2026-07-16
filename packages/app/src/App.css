@@ -146,6 +146,9 @@ body, #root { height: 100vh; overflow: hidden; }
 
 .badge { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
 .badge.manual { background: rgba(224,82,82,0.1); color: var(--danger); }
+.badge.drift { background: var(--warn-bg); color: var(--warn); }
+.badge.hub-only { background: rgba(136,136,153,0.1); color: var(--text-muted); }
+.server-card-header .badge { flex-shrink: 0; }
 .badge.remote { background: var(--accent-alpha-15); color: var(--accent); }
 .badge.local { background: var(--success-bg); color: var(--success); }
 

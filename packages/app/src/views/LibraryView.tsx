@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fetchStatus, syncFromTo, removeServer, undoLast, reorderServers, listCustomClients, removeCustomClient, StatusResult, McpServer, ClientStatus } from "../hooks/useCli";
 import { ContextMenu, MenuItem } from "../components/ContextMenu";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -12,6 +13,18 @@ interface CtxState { x: number; y: number; items: MenuItem[]; }
 interface ConfirmState { message: string; confirmLabel?: string; onConfirm: () => void; }
 interface DropIndicator { column: string; beforeName: string | null; }
 interface Notice { message: string; undoable: boolean; }
+type CardBadge = "hub-only" | "drift";
+
+// A card is "hub-only" if it's not in master (clientOnly), or "drift" if it
+// shares a name with master but the definition differs. Master's own column
+// never gets badges — this is about a client's config vs. the hub.
+// Fields default to [] so a stale bundled CLI without them can't crash the view.
+function cardBadges(client: ClientStatus): Record<string, CardBadge> {
+  const badges: Record<string, CardBadge> = {};
+  for (const name of client.clientOnly ?? []) badges[name] = "hub-only";
+  for (const name of client.drifted ?? []) badges[name] = "drift";
+  return badges;
+}
 
 // ── optimistic update helpers ───────────────────────────────────────────────
 
@@ -50,13 +63,14 @@ interface ServerCardProps {
   columnName: string;
   isCopyMode: boolean;
   isPending: boolean;
+  badge?: CardBadge;
   dropIndicator: DropIndicator | null;
   onDragStart: (name: string, from: string) => void;
   onDragOver: (e: React.DragEvent, name: string, column: string) => void;
   onContextMenu: (e: React.MouseEvent, name: string, columnName: string) => void;
 }
 
-function ServerCard({ name, server, columnName, isCopyMode, isPending, dropIndicator, onDragStart, onDragOver, onContextMenu }: ServerCardProps) {
+function ServerCard({ name, server, columnName, isCopyMode, isPending, badge, dropIndicator, onDragStart, onDragOver, onContextMenu }: ServerCardProps) {
   const desc = server.command
     ? `${server.command} ${(server.args ?? []).join(" ")}`
     : server.url ?? "";
@@ -76,6 +90,12 @@ function ServerCard({ name, server, columnName, isCopyMode, isPending, dropIndic
         <div className="server-card-header">
           <Server size={14} />
           <span className="server-name">{name}</span>
+          {badge === "drift" && (
+            <span className="badge drift" title="master と定義が食い違っています">差分</span>
+          )}
+          {badge === "hub-only" && (
+            <span className="badge hub-only" title="master に存在しないサーバーです">hub外</span>
+          )}
         </div>
         <div className="server-desc">{desc}</div>
       </div>
@@ -93,6 +113,7 @@ interface ColumnProps {
   isCopyMode: boolean;
   dropIndicator: DropIndicator | null;
   pendingKeys: Set<string>;
+  cardBadges?: Record<string, CardBadge>;
   onDragStart: (name: string, from: string) => void;
   onDragOver: (e: React.DragEvent, cardName: string, column: string) => void;
   onDrop: (to: string) => void;
@@ -108,7 +129,7 @@ interface ColumnProps {
 
 function Column({
   title, id, servers, isMaster, isCopyMode,
-  dropIndicator, pendingKeys, onDragStart, onDragOver, onDrop, onDragLeave,
+  dropIndicator, pendingKeys, cardBadges, onDragStart, onDragOver, onDrop, onDragLeave,
   onCardContextMenu, onColContextMenu,
   onColDragStart, onColDragEnd, onMoveLeft, onMoveRight, isColDragging,
 }: ColumnProps) {
@@ -160,6 +181,7 @@ function Column({
             columnName={id}
             isCopyMode={isCopyMode}
             isPending={pendingKeys.has(`${id}/${name}`)}
+            badge={cardBadges?.[name]}
             dropIndicator={dropIndicator}
             onDragStart={onDragStart}
             onDragOver={onDragOver}
@@ -311,6 +333,18 @@ export function LibraryView() {
     pendingCountRef.current -= 1;
     if (pendingCountRef.current === 0) reconcile().catch((e) => setError(String(e)));
   }
+
+  // Re-fetch on window focus so external edits to client configs (other
+  // tools, manual editing) are picked up without an explicit Refresh.
+  // Skipped while an optimistic drop is still in flight so it can't be
+  // clobbered by a stale read racing the pending write.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const unlisten = win.onFocusChanged(({ payload: focused }) => {
+      if (focused && pendingCountRef.current === 0) reconcile().catch(() => {});
+    });
+    return () => { unlisten.then((f) => f()); };
+  }, [reconcile]);
 
   function handleDrop(to: string) {
     if (draggingCol) {
@@ -634,6 +668,7 @@ export function LibraryView() {
               isCopyMode={isCopyMode}
               dropIndicator={dropIndicator}
               pendingKeys={pendingKeys}
+              cardBadges={cardBadges(client)}
               onDragStart={(name, from) => { setDraggingCol(null); setDragging({ name, from }); }}
               onDragOver={handleCardDragOver}
               onDrop={handleDrop}
