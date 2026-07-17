@@ -1,4 +1,5 @@
 import { Package, Search, Settings } from "lucide-react";
+import mcpLogo from "../assets/mcp-logo.png";
 
 export type View = "library" | "discover" | "settings";
 
@@ -16,6 +17,7 @@ const NAV: { id: View; icon: React.ReactNode; label: string }[] = [
 export function Sidebar({ current, onChange }: Props) {
   return (
     <nav className="sidebar" aria-label="メインナビゲーション">
+      <div className="sidebar-brand" aria-hidden="true" title="MCPHub"><img src={mcpLogo} alt="" width={22} height={22} /></div>
       {NAV.map(({ id, icon, label }) => (
         <button
           key={id}
