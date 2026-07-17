@@ -1,6 +1,6 @@
 {
   "name": "@mcp-hub/cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "MCP configuration hub CLI",
   "type": "module",
   "main": "./dist/public.js",
